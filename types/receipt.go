@@ -23,8 +23,6 @@ type Receipt struct {
 	Root              *hexutil.Bytes  `json:"root,omitempty"`
 	BlobGasUsed       *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
 	BlobGasPrice      *hexutil.Big    `json:"blobGasPrice,omitempty"`
-	EventIDs          []common.Hash   `json:"eventIDs,omitempty"`
-	TraceIDs          []common.Hash   `json:"traceIDs,omitempty"`
 
 	// op 字段
 	L1GasPrice            *hexutil.Big    `json:"l1GasPrice,omitempty"`
