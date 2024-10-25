@@ -9,3 +9,7 @@ func WriteFile(path string, data []byte) error {
 func ReadFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
+
+func RemoveDir(path string) error {
+	return os.RemoveAll(path)
+}

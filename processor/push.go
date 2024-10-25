@@ -9,13 +9,11 @@ import (
 	"github.com/DeBankDeFi/pipeline/types"
 	"github.com/DeBankDeFi/pipeline/util"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/segmentio/kafka-go"
 )
 
 // PushProcessor is a processor that pushes data to s3 and kafka
 type PushProcessor struct {
-	LocalProcessor  *LocalProcessor
 	Bucket          string
 	Uploader        *s3manager.Uploader
 	KafkaReader     *kafka.Reader
@@ -23,11 +21,7 @@ type PushProcessor struct {
 	LastBlockNotice *types.BlockChangeNotification
 }
 
-func NewPushProcessor(region string, bucket string, brokers []string, localDirectory string) (*PushProcessor, error) {
-	localProcessor, err := NewLocalProcessor(localDirectory)
-	if err != nil {
-		return nil, err
-	}
+func NewPushProcessor(region string, bucket string, brokers []string) (*PushProcessor, error) {
 	kafkaReader := util.NewKafkaReader(brokers, util.NewBlockNoticeTopic, "push-processor")
 	kafkaWriter := util.NewKafkaWriterForBlockNotice(brokers)
 	s3Uploader, err := util.NewS3Uploader(region)
@@ -41,7 +35,6 @@ func NewPushProcessor(region string, bucket string, brokers []string, localDirec
 	}
 
 	return &PushProcessor{
-		LocalProcessor:  localProcessor,
 		Bucket:          bucket,
 		Uploader:        s3Uploader,
 		KafkaReader:     kafkaReader,
@@ -126,21 +119,8 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	return nil
 }
 
-func (p *PushProcessor) PushBlock(blockHash common.Hash, blockNotice *types.BlockChangeNotification) error {
-	exist, err := p.LocalProcessor.CheckBlockDataExist(blockHash)
-	if err != nil {
-		return err
-	}
-	if !exist {
-		return fmt.Errorf("block data not exist")
-	}
-
-	dataFiles, err := p.LocalProcessor.GetBlockData(blockHash)
-	if err != nil {
-		return err
-	}
-
-	err = p.UploadFilesToS3(dataFiles)
+func (p *PushProcessor) PushBlock(dataFiles []DataFile, blockNotice *types.BlockChangeNotification) error {
+	err := p.UploadFilesToS3(dataFiles)
 	if err != nil {
 		return err
 	}

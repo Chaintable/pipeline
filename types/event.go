@@ -24,6 +24,13 @@ type Event struct {
 	GlobalIndex  hexutil.Uint `json:"globalIndex"`
 }
 
+type EventPosition struct {
+	Index        uint  `json:"logIndex"`
+	TraceAddress []int `json:"traceAddress"`
+	Position     *uint `json:"position"`
+	GlobalIndex  uint  `json:"globalIndex"`
+}
+
 type EventHash struct {
 	Address      common.Address `json:"address"`
 	Topics       []common.Hash  `json:"topics"`
