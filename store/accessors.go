@@ -8,15 +8,13 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-func WriteBlockEventCount(batch *pebble.Batch, blockNumber uint64, blockHash common.Hash, count uint64) error {
-	key := append(EncodeNumber(blockNumber), blockHash.Bytes()...)
-	key = append(key, BlockEventCountPrefix...)
+func WriteBlockEventCount(batch *pebble.Batch, blockHash common.Hash, count uint64) error {
+	key := append(blockHash.Bytes(), BlockEventCountPrefix...)
 	return batch.Set(key, EncodeNumber(count), nil)
 }
 
-func ReadBlockEventCount(store *pebble.DB, blockNumber uint64, blockHash common.Hash) (uint64, error) {
-	key := append(EncodeNumber(blockNumber), blockHash.Bytes()...)
-	key = append(key, BlockEventCountPrefix...)
+func ReadBlockEventCount(store *pebble.DB, blockHash common.Hash) (uint64, error) {
+	key := append(blockHash.Bytes(), BlockEventCountPrefix...)
 	value, closer, err := store.Get(key)
 	defer closer.Close()
 	if err != nil {

@@ -41,7 +41,7 @@ func (p *ExtraInfoProcessor) AddExtraInfo(blockNumber uint64, blockHash common.H
 	p.RecentExtraInfos.Add(blockHash, extraInfo)
 	batch := p.store.NewBatch()
 	defer batch.Close()
-	store.WriteBlockEventCount(batch, blockNumber, blockHash, extraInfo.TotalEventCount)
+	store.WriteBlockEventCount(batch, blockHash, extraInfo.TotalEventCount)
 	store.WriteDiffRlp(batch, blockNumber, blockHash, extraInfo.BlockDiff)
 	for txHash, traces := range extraInfo.Traces {
 		store.WriteTrace(batch, blockNumber, blockHash, txHash, traces)
@@ -55,7 +55,7 @@ func (p *ExtraInfoProcessor) GetExtraInfo(blockNumber uint64, blockHash common.H
 	if ok {
 		return extraInfo, nil
 	}
-	blockEventCount, err := store.ReadBlockEventCount(p.store, blockNumber, blockHash)
+	blockEventCount, err := store.ReadBlockEventCount(p.store, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (p *ExtraInfoProcessor) GetBlockEventCount(blockNumber uint64, blockHash co
 	if extraInfo, ok := p.RecentExtraInfos.Get(blockHash); ok {
 		return extraInfo.TotalEventCount, nil
 	}
-	return store.ReadBlockEventCount(p.store, blockNumber, blockHash)
+	return store.ReadBlockEventCount(p.store, blockHash)
 }
 
 func (p *ExtraInfoProcessor) Close() error {

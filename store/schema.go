@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	// BlockNumber+BlockHash+BlockEventCountPrefix -> TotalEventCount
+	// BlockHash+BlockEventCountPrefix -> TotalEventCount
 	BlockEventCountPrefix = []byte("c")
 	// BlockNumber+BlockHash+DiffPrefix -> Diff
 	DiffPrefix = []byte("d")
