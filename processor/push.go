@@ -28,10 +28,19 @@ func NewPushProcessor(region string, bucket string, brokers []string) (*PushProc
 	if err != nil {
 		return nil, err
 	}
+
 	var lastBlockNotice *types.BlockChangeNotification
-	lastBlockNotice, err = util.GetLastBlockNotice(kafkaReader)
+
+	empty, err := util.IsTopicEmpty(brokers[0], util.NewBlockNoticeTopic)
 	if err != nil {
 		return nil, err
+	}
+
+	if !empty {
+		lastBlockNotice, err = util.GetLastBlockNotice(kafkaReader)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &PushProcessor{
@@ -103,12 +112,12 @@ func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
 }
 
 func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification) error {
-	if p.LastPushedBlock() == nil && blockNotice.NewBlocks[0].BlockNumber.ToInt().Uint64() != 0 {
+	if p.LastPushedBlock() == nil && blockNotice.NewBlocks[0].BlockNumber != 0 {
 		return fmt.Errorf("last pushed block is empty but new block number is not 0")
 	}
 
 	if p.LastPushedBlock() != nil &&
-		(p.LastPushedBlock().BlockNumber.ToInt().Uint64() >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber.ToInt().Uint64()) {
+		(p.LastPushedBlock().BlockNumber >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber) {
 		return nil
 	}
 

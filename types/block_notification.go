@@ -2,7 +2,6 @@ package types
 
 import (
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type BlockChangeNotification struct {
@@ -12,7 +11,7 @@ type BlockChangeNotification struct {
 }
 
 type BlockContext struct {
-	Hash        common.Address `json:"hash"`
-	ParrentHash common.Address `json:"parrentHash"`
-	BlockNumber *hexutil.Big   `json:"blockNumber"`
+	Hash        common.Hash `json:"hash"`
+	ParrentHash common.Hash `json:"parrentHash"`
+	BlockNumber uint64      `json:"blockNumber"`
 }
