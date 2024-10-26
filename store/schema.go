@@ -7,12 +7,6 @@ import (
 var (
 	// BlockHash+BlockEventCountPrefix -> TotalEventCount
 	BlockEventCountPrefix = []byte("c")
-	// BlockNumber+BlockHash+DiffPrefix -> Diff
-	DiffPrefix = []byte("d")
-	// BlockNumber+BlockHash+TracePrefix+TxHash -> []CallFrame
-	TracePrefix = []byte("t")
-	// BlockNumber+BlockHash+EventIndexPrefix -> []EventPosition
-	EventIndexPrefix = []byte("e")
 )
 
 func EncodeNumber(blockNumber uint64) []byte {

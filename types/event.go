@@ -13,21 +13,21 @@ type Event struct {
 	Topics      []common.Hash  `json:"topics"`
 	Data        hexutil.Bytes  `json:"data"`
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
+	BlockHash   common.Hash    `json:"blockHash"`
 	TxHash      common.Hash    `json:"transactionHash"`
 	TxIndex     hexutil.Uint   `json:"transactionIndex"`
-	BlockHash   common.Hash    `json:"blockHash"`
 	Index       hexutil.Uint   `json:"logIndex"`
 	Removed     bool           `json:"removed"`
 
 	TraceAddress []int        `json:"traceAddress"`
-	Position     *uint        `json:"position"`
+	Position     *int         `json:"position"`
 	GlobalIndex  hexutil.Uint `json:"globalIndex"`
 }
 
 type EventPosition struct {
 	Index        uint  `json:"logIndex"`
 	TraceAddress []int `json:"traceAddress"`
-	Position     *uint `json:"position"`
+	Position     *int  `json:"position"`
 	GlobalIndex  uint  `json:"globalIndex"`
 }
 
@@ -38,7 +38,7 @@ type EventHash struct {
 	TxHash       common.Hash    `json:"transactionHash"`
 	Index        hexutil.Uint   `json:"logIndex"`
 	TraceAddress []int          `json:"traceAddress"`
-	Position     *uint          `json:"position"`
+	Position     *int           `json:"position"`
 	GlobalIndex  hexutil.Uint   `json:"globalIndex"`
 }
 

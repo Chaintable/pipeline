@@ -33,10 +33,8 @@ type Header struct {
 
 type Block struct {
 	Header
-	Size   hexutil.Uint64 `json:"size"`
-	Uncles []*Header      `json:"uncles"`
-	// tx hash list
-	Transactions []common.Hash     `json:"transactions"`
-	Withdrawals  types.Withdrawals `json:"withdrawals"`
-	Requests     types.Requests    `json:"requests"`
+	Size        hexutil.Uint64    `json:"size"`
+	Uncles      []common.Hash     `json:"uncles"`
+	Withdrawals types.Withdrawals `json:"withdrawals"`
+	Requests    types.Requests    `json:"requests"`
 }

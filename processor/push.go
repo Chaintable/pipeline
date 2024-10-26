@@ -43,13 +43,30 @@ func NewPushProcessor(region string, bucket string, brokers []string) (*PushProc
 	}, nil
 }
 
-func (p *PushProcessor) UploadFilesToS3(files []DataFile) error {
+func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
+	times := 0
+	for {
+		err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
+		if err != nil {
+			if times > 3 {
+				return err
+			}
+			time.Sleep(time.Second)
+			times++
+			continue
+		}
+		break
+	}
+	return nil
+}
+
+func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 	var wg sync.WaitGroup
 	var errs []error
 	var lock sync.Mutex
 	for _, file := range files {
 		wg.Add(1)
-		go func(file DataFile) {
+		go func(file *DataFile) {
 			times := 0
 			for {
 				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
@@ -119,16 +136,7 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	return nil
 }
 
-func (p *PushProcessor) PushBlock(dataFiles []DataFile, blockNotice *types.BlockChangeNotification) error {
-	err := p.UploadFilesToS3(dataFiles)
-	if err != nil {
-		return err
-	}
-
-	err = p.PushBlockChangeNotification(blockNotice)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (p *PushProcessor) Close() {
+	p.KafkaReader.Close()
+	p.KafkaWriter.Close()
 }

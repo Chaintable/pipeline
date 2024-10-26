@@ -7,7 +7,7 @@ import (
 )
 
 type Transaction struct {
-	BlockHash           *common.Hash      `json:"blockHash"`
+	BlockHash           common.Hash       `json:"blockHash"`
 	BlockNumber         *hexutil.Big      `json:"blockNumber"`
 	From                common.Address    `json:"from"`
 	Gas                 hexutil.Uint64    `json:"gas"`
