@@ -21,9 +21,9 @@ type PushProcessor struct {
 	LastBlockNotice *types.BlockChangeNotification
 }
 
-func NewPushProcessor(region string, bucket string, brokers []string) (*PushProcessor, error) {
-	kafkaReader := util.NewKafkaReader(brokers, util.NewBlockNoticeTopic, "push-processor")
-	kafkaWriter := util.NewKafkaWriterForBlockNotice(brokers)
+func NewPushProcessor(region string, bucket string, brokers []string, topic string) (*PushProcessor, error) {
+	kafkaReader := util.NewKafkaReader(brokers, topic, "push-processor")
+	kafkaWriter := util.NewKafkaWriterForBlockNotice(brokers, topic)
 	s3Uploader, err := util.NewS3Uploader(region)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func NewPushProcessor(region string, bucket string, brokers []string) (*PushProc
 
 	var lastBlockNotice *types.BlockChangeNotification
 
-	empty, err := util.IsTopicEmpty(brokers[0], util.NewBlockNoticeTopic)
+	empty, err := util.IsTopicEmpty(brokers[0], topic)
 	if err != nil {
 		return nil, err
 	}

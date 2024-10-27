@@ -9,10 +9,6 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-const (
-	NewBlockNoticeTopic = "new_block_notice"
-)
-
 func NewKafkaReader(brokers []string, topic string, groupID string) *kafka.Reader {
 	return kafka.NewReader(kafka.ReaderConfig{
 		Brokers: brokers,
@@ -84,10 +80,10 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 	return blockNotice, nil
 }
 
-func NewKafkaWriterForBlockNotice(brokers []string) *kafka.Writer {
+func NewKafkaWriterForBlockNotice(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
-		Topic:        NewBlockNoticeTopic,
+		Topic:        topic,
 		Balancer:     &kafka.Hash{},
 		RequiredAcks: kafka.RequireOne,
 	}
