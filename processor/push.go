@@ -32,16 +32,9 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 
 	var lastBlockNotice *types.BlockChangeNotification
 
-	empty, err := util.IsTopicEmpty(brokers[0], topic)
+	lastBlockNotice, err = util.GetLastBlockNotice(kafkaReader)
 	if err != nil {
 		return nil, err
-	}
-
-	if !empty {
-		lastBlockNotice, err = util.GetLastBlockNotice(kafkaReader)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return &PushProcessor{

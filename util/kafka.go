@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/DeBankDeFi/pipeline/types"
 	"github.com/segmentio/kafka-go"
@@ -17,44 +18,6 @@ func NewKafkaReader(brokers []string, topic string, groupID string) *kafka.Reade
 	})
 }
 
-func IsTopicEmpty(broker, topic string) (bool, error) {
-	// 创建 Kafka 客户端的连接
-	conn, err := kafka.Dial("tcp", broker)
-	if err != nil {
-		return false, fmt.Errorf("failed to connect to Kafka: %v", err)
-	}
-	defer conn.Close()
-
-	// 获取该 Topic 的分区信息
-	partitions, err := conn.ReadPartitions(topic)
-	if err != nil {
-		return false, fmt.Errorf("failed to read partitions: %v", err)
-	}
-
-	// 遍历所有分区，检查每个分区的最新偏移量
-	for _, p := range partitions {
-		partitionConn, err := kafka.DialPartition(context.Background(), "tcp", broker, kafka.Partition{
-			Topic: topic,
-			ID:    p.ID,
-		})
-		if err != nil {
-			return false, fmt.Errorf("failed to connect to partition %d: %v", p.ID, err)
-		}
-		defer partitionConn.Close()
-
-		first, latest, err := partitionConn.ReadOffsets()
-		if err != nil {
-			return false, fmt.Errorf("failed to get offset: %v", err)
-		}
-
-		if first != latest {
-			return false, nil
-		}
-	}
-
-	return true, nil
-}
-
 // 获取最后一个BlockChangeNotification
 func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, error) {
 	err := reader.SetOffset(kafka.LastOffset)
@@ -62,8 +25,16 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 		return nil, err
 	}
 
-	msg, err := reader.ReadMessage(context.Background())
+	// 尝试读取一条消息，如果读不到则说明没有消息
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	msg, err := reader.ReadMessage(ctx)
 	if err != nil {
+		if err == context.DeadlineExceeded {
+			// 如果超时且没有读取到消息，则认为 Topic 为空
+			return nil, nil
+		}
 		return nil, fmt.Errorf("error reading message: %v", err)
 	}
 
