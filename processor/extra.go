@@ -11,7 +11,7 @@ type ExtraInfoProcessor struct {
 }
 
 func NewExtraInfoProcessor(path string) (*ExtraInfoProcessor, error) {
-	store, err := store.Init(path, 1024*1024*1024)
+	store, err := store.Init(path)
 	if err != nil {
 		return nil, err
 	}
