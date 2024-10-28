@@ -23,7 +23,6 @@ type PushProcessor struct {
 
 func NewPushProcessor(region string, bucket string, brokers []string, topic string) (*PushProcessor, error) {
 	kafkaReader := util.NewKafkaReader(brokers, topic, "")
-	fmt.Printf("kafka reader created")
 	kafkaWriter := util.NewKafkaWriterForBlockNotice(brokers, topic)
 	s3Uploader, err := util.NewS3Uploader(region)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/DeBankDeFi/pipeline/types"
@@ -31,11 +32,9 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 
 	msg, err := reader.ReadMessage(ctx)
 	if err != nil {
-		if err == context.DeadlineExceeded {
-			// 如果超时且没有读取到消息，则认为 Topic 为空
-			return nil, nil
+		if strings.HasSuffix(err.Error(), context.DeadlineExceeded.Error()) {
+			return nil, fmt.Errorf("error reading message: %v", err)
 		}
-		return nil, fmt.Errorf("error reading message: %v", err)
 	}
 
 	if !bytes.Equal(msg.Key, []byte("NewBlock")) {
