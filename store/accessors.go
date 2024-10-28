@@ -13,7 +13,9 @@ func WriteBlockEventCount(batch *pebble.Batch, blockHash common.Hash, count uint
 func ReadBlockEventCount(store *pebble.DB, blockHash common.Hash) (uint64, error) {
 	key := append(blockHash.Bytes(), BlockEventCountPrefix...)
 	value, closer, err := store.Get(key)
-	defer closer.Close()
+	if closer != nil {
+		defer closer.Close()
+	}
 	if err == pebble.ErrNotFound {
 		return 0, nil
 	}
