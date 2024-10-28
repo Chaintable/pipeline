@@ -33,7 +33,7 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 	msg, err := reader.ReadMessage(ctx)
 	if err != nil {
 		if strings.HasSuffix(err.Error(), context.DeadlineExceeded.Error()) {
-			return nil, fmt.Errorf("error reading message: %v", err)
+			return nil, nil
 		}
 	}
 
