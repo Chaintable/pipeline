@@ -15,8 +15,15 @@ func EncodeToJsonGzip(v any) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	defer zw.Close()
-	zw.Write(jsonBytes)
+	if _, err := zw.Write(jsonBytes); err != nil {
+		zw.Close()
+		return nil, err
+	}
+
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+
 	return buf.Bytes(), nil
 }
 
