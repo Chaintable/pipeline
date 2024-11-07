@@ -12,6 +12,6 @@ type BlockChangeNotification struct {
 
 type BlockContext struct {
 	Hash        common.Hash `json:"hash"`
-	ParrentHash common.Hash `json:"parrentHash"`
+	ParentHash  common.Hash `json:"parentHash"`
 	BlockNumber uint64      `json:"blockNumber"`
 }
