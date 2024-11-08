@@ -2,9 +2,9 @@ package processor
 
 import (
 	"fmt"
-
 	"github.com/DeBankDeFi/pipeline/types"
 	"github.com/DeBankDeFi/pipeline/util"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type DataFile struct {
@@ -12,80 +12,80 @@ type DataFile struct {
 	Data  []byte
 }
 
-// s3Key: <blockHash>/block
-func SerializeBlock(block *types.Block) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/block
+func SerializeBlock(chainID *hexutil.Big, block *types.Block) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(block)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/block", block.Hash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/block", chainID.String(), block.Hash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3Key: <blockHash>/transaction/<transactionHash>
-func SerializeTransaction(transaction *types.Transaction) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/transaction/<transactionHash>
+func SerializeTransaction(chainID *hexutil.Big, transaction *types.Transaction) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(transaction)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/transaction/%s", transaction.BlockHash.Hex(), transaction.Hash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/transaction/%s", chainID.String(), transaction.BlockHash.Hex(), transaction.Hash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3Key: <blockHash>/receipt/<transactionHash>
-func SerializeReceipt(receipt *types.Receipt) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/receipt/<transactionHash>
+func SerializeReceipt(chainID *hexutil.Big, receipt *types.Receipt) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(receipt)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/receipt/%s", receipt.BlockHash.Hex(), receipt.TransactionHash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/receipt/%s", chainID.String(), receipt.BlockHash.Hex(), receipt.TransactionHash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3Key: <blockHash>/trace/<transactionHash>/<traceHash>
-func SerializeTrace(trace types.CallFrame) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/trace/<transactionHash>/<traceHash>
+func SerializeTrace(chainID *hexutil.Big, trace types.CallFrame) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(trace)
 	if err != nil {
 		return nil, err
 	}
 	traceHash := trace.Hash()
-	s3Key := fmt.Sprintf("%s/trace/%s/%s", trace.BlockHash.Hex(), trace.TransactionHash.Hex(), traceHash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/trace/%s/%s", chainID.String(), trace.BlockHash.Hex(), trace.TransactionHash.Hex(), traceHash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3Key: <blockHash>/event/<transactionHash>/<eventHash>
-func SerializeEvent(event *types.Event) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/event/<transactionHash>/<eventHash>
+func SerializeEvent(chainID *hexutil.Big, event *types.Event) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(event)
 	if err != nil {
 		return nil, err
 	}
 	eventHash := event.Hash()
-	s3Key := fmt.Sprintf("%s/event/%s/%s", event.BlockHash.Hex(), event.TxHash.Hex(), eventHash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/event/%s/%s", chainID.String(), event.BlockHash.Hex(), event.TxHash.Hex(), eventHash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3Key: <blockHash>/stateDiff
-func SerializeStateDiff(stateDiff *types.BlockStorageDiff) (*DataFile, error) {
+// s3Key: <chainID>/<blockHash>/stateDiff
+func SerializeStateDiff(chainID *hexutil.Big, stateDiff *types.BlockStorageDiff) (*DataFile, error) {
 	data, err := util.EncodeToRlp(stateDiff)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/stateDiff", stateDiff.Hash.Hex())
+	s3Key := fmt.Sprintf("%s/%s/stateDiff", chainID.String(), stateDiff.Hash.Hex())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
