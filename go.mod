@@ -1,6 +1,6 @@
 module github.com/DeBankDeFi/pipeline
 
-go 1.22.6
+go 1.22.5
 
 require (
 	github.com/aws/aws-sdk-go v1.55.5

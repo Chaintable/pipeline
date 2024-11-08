@@ -21,7 +21,13 @@ func NewKafkaReader(brokers []string, topic string, groupID string) *kafka.Reade
 
 // 获取最后一个BlockChangeNotification
 func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, error) {
-	err := reader.SetOffset(kafka.LastOffset)
+	reader.SetOffset(0)
+	lag, err := reader.ReadLag(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	err = reader.SetOffset(lag - 1)
 	if err != nil {
 		return nil, err
 	}
