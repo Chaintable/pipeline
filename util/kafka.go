@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/DeBankDeFi/pipeline/types"
 	"github.com/segmentio/kafka-go"
@@ -21,20 +19,23 @@ func NewKafkaReader(brokers []string, topic string, groupID string) *kafka.Reade
 
 // 获取最后一个BlockChangeNotification
 func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, error) {
-	err := reader.SetOffset(kafka.LastOffset)
+	reader.SetOffset(0)
+	lag, err := reader.ReadLag(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if lag == 0 {
+		return nil, nil
+	}
+
+	err = reader.SetOffset(lag - 1)
 	if err != nil {
 		return nil, err
 	}
 
-	// 尝试读取一条消息，如果读不到则说明没有消息
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	msg, err := reader.ReadMessage(ctx)
+	msg, err := reader.ReadMessage(context.Background())
 	if err != nil {
-		if strings.HasSuffix(err.Error(), context.DeadlineExceeded.Error()) {
-			return nil, nil
-		}
+		return nil, err
 	}
 
 	if !bytes.Equal(msg.Key, []byte("NewBlock")) {
