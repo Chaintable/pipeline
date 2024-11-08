@@ -10,7 +10,6 @@ type NewAccount struct {
 	Balance  *uint256.Int
 	Nonce    uint64
 	CodeHash common.Hash
-	Root     common.Hash
 }
 
 type NewCode struct {
