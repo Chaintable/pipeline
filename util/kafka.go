@@ -57,6 +57,8 @@ func NewKafkaWriterForBlockNotice(brokers []string, topic string) *kafka.Writer 
 		Topic:        topic,
 		Balancer:     &kafka.Hash{},
 		RequiredAcks: kafka.RequireOne,
+		// 默认100个，或者等待1s才发生
+		BatchSize: 1,
 	}
 }
 
