@@ -6,22 +6,14 @@ import (
 	"fmt"
 )
 
-func ToHash(args ...interface{}) (string, error) {
+func ToHash(args []string) (string, error) {
 	hasher := md5.New()
 
 	for _, arg := range args {
-		if arg == nil {
+		if arg == "" {
 			return "", fmt.Errorf("nil argument provided")
 		}
-		var str string
-		switch v := arg.(type) {
-		case string:
-			str = v
-		default:
-			str = fmt.Sprintf("%v", v)
-		}
-
-		hasher.Write([]byte(str))
+		hasher.Write([]byte(arg))
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
