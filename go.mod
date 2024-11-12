@@ -1,4 +1,4 @@
-module github.com/DeBankDeFi/pipeline
+module github.com/Chaintable/pipeline
 
 go 1.22.5
 

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DeBankDeFi/pipeline/types"
-	"github.com/DeBankDeFi/pipeline/util"
+	"github.com/Chaintable/pipeline/types"
+	"github.com/Chaintable/pipeline/util"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/segmentio/kafka-go"
 )

@@ -2,8 +2,8 @@ package processor
 
 import (
 	"fmt"
-	"github.com/DeBankDeFi/pipeline/types"
-	"github.com/DeBankDeFi/pipeline/util"
+	"github.com/Chaintable/pipeline/types"
+	"github.com/Chaintable/pipeline/util"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 

@@ -1,7 +1,7 @@
 package processor
 
 import (
-	"github.com/DeBankDeFi/pipeline/store"
+	"github.com/Chaintable/pipeline/store"
 	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 )
