@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/DeBankDeFi/pipeline/types"
+	"github.com/Chaintable/pipeline/types"
 	"github.com/segmentio/kafka-go"
 )
 
