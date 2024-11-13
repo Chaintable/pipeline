@@ -8,8 +8,8 @@ import (
 
 type WithdrawalNativeTransfer struct {
 	ID           string         `json:"id"`
-	Idx          uint64         `json:"idx"`
-	ValidatorIdx uint64         `json:"validator_idx"`
+	Idx          int64          `json:"idx"`
+	ValidatorIdx *big.Int       `json:"validator_idx"`
 	ToAddress    common.Address `json:"to_address"`
-	Value        *big.Int       `json:"value"`
+	Value        float64        `json:"value"` // amount / 1e18
 }

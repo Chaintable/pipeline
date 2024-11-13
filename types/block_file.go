@@ -19,9 +19,9 @@ func (bf *BlockFile) ValidationHash() int {
 	var ids []string
 
 	// Collect all IDs
-	ids = append(ids, bf.Block.ID.String()) // assuming Block has an ID field
+	ids = append(ids, bf.Block.ID) // assuming Block has an ID field
 	for _, tx := range bf.Txs {
-		ids = append(ids, tx.ID.String())
+		ids = append(ids, tx.ID)
 	}
 	for _, event := range bf.Events {
 		ids = append(ids, event.ID)

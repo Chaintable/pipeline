@@ -3,24 +3,23 @@ package types
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type Transaction struct {
-	ID   common.Hash    `json:"id"`
-	From common.Address `json:"from_addr"`
+	ID   string `json:"id"`
+	From string `json:"from_addr"`
 	// create的时候是合约地址
-	To               *common.Address `json:"to_addr"`
-	Gas              uint64          `json:"gas_limit"`
-	GasPrice         *big.Int        `json:"gas_price"`
-	GasUsed          hexutil.Uint64  `json:"gas_used"`
-	Status           uint64          `json:"status"`
-	GasFeeCap        *big.Int        `json:"max_fee_per_gas"`
-	GasTipCap        *big.Int        `json:"max_priority_fee_per_gas"`
-	Input            hexutil.Bytes   `json:"input"`
-	Nonce            uint64          `json:"nonce"`
-	TransactionIndex uint64          `json:"transaction_index"`
-	Value            *big.Int        `json:"value"`
-	Type             hexutil.Uint64  `json:"type"`
+	To               string         `json:"to_addr"`
+	Gas              *big.Int       `json:"gas_limit"`
+	GasPrice         *big.Int       `json:"gas_price"`
+	GasUsed          hexutil.Uint64 `json:"gas_used"`
+	Status           bool           `json:"status"`
+	GasFeeCap        *big.Int       `json:"max_fee_per_gas"`
+	GasTipCap        *big.Int       `json:"max_priority_fee_per_gas"`
+	Input            hexutil.Bytes  `json:"input"`
+	Nonce            *big.Int       `json:"nonce"`
+	TransactionIndex int64          `json:"transaction_index"`
+	Value            float64        `json:"value"` // 转成小数  value/1e18
+	Type             int64          `json:"type"`
 }
