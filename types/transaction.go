@@ -1,40 +1,25 @@
 package types
 
 import (
-	"github.com/ethereum/go-ethereum/common"
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 type Transaction struct {
-	BlockHash           common.Hash       `json:"blockHash"`
-	BlockNumber         *hexutil.Big      `json:"blockNumber"`
-	From                common.Address    `json:"from"`
-	Gas                 hexutil.Uint64    `json:"gas"`
-	GasPrice            *hexutil.Big      `json:"gasPrice"`
-	GasFeeCap           *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	GasTipCap           *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	MaxFeePerBlobGas    *hexutil.Big      `json:"maxFeePerBlobGas,omitempty"`
-	Hash                common.Hash       `json:"hash"`
-	Input               hexutil.Bytes     `json:"input"`
-	Nonce               hexutil.Uint64    `json:"nonce"`
-	To                  *common.Address   `json:"to"`
-	TransactionIndex    *hexutil.Uint64   `json:"transactionIndex"`
-	Value               *hexutil.Big      `json:"value"`
-	Type                hexutil.Uint64    `json:"type"`
-	Accesses            *types.AccessList `json:"accessList,omitempty"`
-	ChainID             *hexutil.Big      `json:"chainId,omitempty"`
-	BlobVersionedHashes []common.Hash     `json:"blobVersionedHashes,omitempty"`
-	V                   *hexutil.Big      `json:"v"`
-	R                   *hexutil.Big      `json:"r"`
-	S                   *hexutil.Big      `json:"s"`
-	YParity             *hexutil.Uint64   `json:"yParity,omitempty"`
-
-	// op 字段
-	// deposit-tx only
-	SourceHash *common.Hash `json:"sourceHash,omitempty"`
-	Mint       *hexutil.Big `json:"mint,omitempty"`
-	IsSystemTx *bool        `json:"isSystemTx,omitempty"`
-	// deposit-tx post-Canyon only
-	DepositReceiptVersion *hexutil.Uint64 `json:"depositReceiptVersion,omitempty"`
+	ID   string `json:"id"`
+	From string `json:"from_addr"`
+	// create的时候是合约地址
+	To               string        `json:"to_addr"`
+	Gas              *big.Int      `json:"gas_limit"`
+	GasPrice         *big.Int      `json:"gas_price"`
+	GasUsed          *big.Int      `json:"gas_used"`
+	Status           bool          `json:"status"`
+	GasFeeCap        *big.Int      `json:"max_fee_per_gas"`
+	GasTipCap        *big.Int      `json:"max_priority_fee_per_gas"`
+	Input            hexutil.Bytes `json:"input"`
+	Nonce            *big.Int      `json:"nonce"`
+	TransactionIndex int64         `json:"idx"`
+	Value            float64       `json:"value"` // 转成小数  value/1e18
+	Type             int64         `json:"type"`
 }
