@@ -20,21 +20,30 @@ func SerializeFile(chainID *hexutil.Big, blockFile *types.BlockFile) (*DataFile,
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/%d/%s", chainID.String(), blockFile.Block.Height, blockFile.Block.ID.String())
+	s3Key := fmt.Sprintf("%s/%d/%s", chainID.String(), blockFile.Block.Height, blockFile.Block.ID)
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
+// s3key: chain_id/block_height/block_id/validation
+// 外部s3,empty object,只用key
+func SerializeFileValidation(chainID *hexutil.Big, blockFile *types.BlockFile) (*DataFile, error) {
+	s3Key := fmt.Sprintf("%s/%d/%s/%d", chainID.String(), blockFile.Block.Height, blockFile.Block.ID, blockFile.ValidationHash())
+	return &DataFile{
+		S3key: s3Key,
+	}, nil
+}
+
 // s3Key: <chainID>/<blockHash>/header
 // 内部s3
-func SerializeHeader(chainID *hexutil.Big, header *types.HeaderWithValidationHash) (*DataFile, error) {
+func SerializeHeader(chainID *hexutil.Big, header *types.Header) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(header)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/%s/block", chainID.String(), header.Header.Hash.String())
+	s3Key := fmt.Sprintf("%s/%s/block", chainID.String(), header.Hash.String())
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,

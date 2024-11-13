@@ -62,9 +62,3 @@ type Header struct {
 	ParentBeaconBlockRoot *common.Hash     `json:"parentBeaconBlockRoot,omitempty"`
 	RequestsRoot          *common.Hash     `json:"requestsRoot,omitempty"`
 }
-
-// 见block file的ValidationHash方法
-type HeaderWithValidationHash struct {
-	Header         Header `json:"header"`
-	ValidationHash int    `json:"validationHash"`
-}
