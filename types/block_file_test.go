@@ -1,0 +1,20 @@
+package types
+
+import "testing"
+
+func TestBlockFileTest(t *testing.T) {
+	bf := BlockFile{
+		Block: Block{
+			ID: "abcd",
+		},
+		Txs: []Transaction{
+			{ID: "efgh"},
+		},
+	}
+
+	validationHash := bf.ValidationHash()
+
+	if validationHash != 54217265 {
+		t.Errorf("Expected 54217265 but got %d", validationHash)
+	}
+}

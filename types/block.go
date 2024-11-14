@@ -8,7 +8,9 @@ type Block struct {
 	ID            string   `json:"id"`
 	Height        *big.Int `json:"height"`
 	ParentID      string   `json:"parent_id"`
-	BaseFeePerGas *big.Int `json:"base_fee_per_gas,omitempty"`
+	BaseFeePerGas *big.Int `json:"base_fee_per_gas"`
 	Miner         string   `json:"miner"`
-	TimeAt        float64  `json:"time_at"`
+	GasLimit      *big.Int `json:"gas_limit"`
+	Gasused       *big.Int `json:"gas_used"`
+	Timestamp     float64  `json:"timestamp"`
 }

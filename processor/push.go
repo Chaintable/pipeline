@@ -8,14 +8,14 @@ import (
 
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/segmentio/kafka-go"
 )
 
 // PushProcessor is a processor that pushes data to s3 and kafka
 type PushProcessor struct {
 	Bucket          string
-	Uploader        *s3manager.Uploader
+	Uploader        *s3.Client
 	KafkaReader     *kafka.Reader
 	KafkaWriter     *kafka.Writer
 	LastBlockNotice *types.BlockChangeNotification
@@ -23,8 +23,8 @@ type PushProcessor struct {
 
 func NewPushProcessor(region string, bucket string, brokers []string, topic string) (*PushProcessor, error) {
 	kafkaReader := util.NewKafkaReader(brokers, topic, "")
-	kafkaWriter := util.NewKafkaWriterForBlockNotice(brokers, topic)
-	s3Uploader, err := util.NewS3Uploader(region)
+	kafkaWriter := util.NewKafkaWriter(brokers, topic)
+	s3Uploader, err := util.NewS3Client(region)
 	if err != nil {
 		return nil, err
 	}

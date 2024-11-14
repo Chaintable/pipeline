@@ -2,26 +2,25 @@ package util
 
 import (
 	"bytes"
+	"context"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-func NewS3Uploader(region string) (*s3manager.Uploader, error) {
-	s3Session, err := session.NewSession(&aws.Config{
-		Region: aws.String(region),
-	})
+func NewS3Client(region string) (*s3.Client, error) {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		return nil, err
 	}
-	return s3manager.NewUploader(s3Session), nil
+	client := s3.NewFromConfig(cfg)
+	return client, nil
 }
 
-func UploadFileToS3(uploader *s3manager.Uploader, bucket string, key string, data []byte) error {
-	_, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
+func UploadFileToS3(uploader *s3.Client, bucket string, key string, data []byte) error {
+	_, err := uploader.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
 		Body:   bytes.NewReader(data),
 	})
 	return err
