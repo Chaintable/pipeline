@@ -7,10 +7,9 @@ import (
 )
 
 type Transaction struct {
-	ID   string `json:"id"`
-	From string `json:"from_addr"`
-	// create的时候是合约地址
-	To               string        `json:"to_addr"`
+	ID               string        `json:"id"`
+	From             string        `json:"from_addr"`
+	To               string        `json:"to_addr"` // create的时候是合约地址
 	Gas              *big.Int      `json:"gas_limit"`
 	GasPrice         *big.Int      `json:"gas_price"`
 	GasUsed          *big.Int      `json:"gas_used"`
@@ -20,6 +19,5 @@ type Transaction struct {
 	Input            hexutil.Bytes `json:"input"`
 	Nonce            *big.Int      `json:"nonce"`
 	TransactionIndex int64         `json:"idx"`
-	Value            float64       `json:"value"` // 转成小数  value/1e18
-	Type             int64         `json:"type"`
+	Value            *hexutil.Big  `json:"value"`
 }

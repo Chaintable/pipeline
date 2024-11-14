@@ -6,20 +6,21 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
+// id = to_hash(trace['tx_id'], trace['parent_trace_id'], trace['pos_in_parent_trace'])
 type Trace struct {
-	ID                   string        `json:"id"`
-	From                 string        `json:"from_addr"`
-	Gas                  *big.Int      `json:"gas_limit"`
-	Input                hexutil.Bytes `json:"input"`
-	To                   string        `json:"to_addr"`
-	Value                float64       `json:"value"` // double , value / 1e8
-	GasUsed              *big.Int      `json:"gasUsed"`
-	Output               hexutil.Bytes `json:"output"`
-	Subtraces            int64         `json:"subtraces"`
-	TraceAddress         string        `json:"trace_address"` // strings.Join(strArr, ", ")
-	CallCreateRewardType string        `json:"type"`          // ['create', 'suicide', 'call', 'empty', 'reward']
-	CallType             string        `json:"call_type"`
-	RewardType           string        `json:"reward_type"`
-	Error                string        `json:"error"`
-	TxID                 string        `json:"tx_id"`
+	ID                string        `json:"id"`
+	From              string        `json:"from_addr"`
+	Gas               *big.Int      `json:"gas_limit"`
+	Input             hexutil.Bytes `json:"input"`
+	To                string        `json:"to_addr"`
+	Value             *hexutil.Big  `json:"value"`
+	GasUsed           *big.Int      `json:"gasUsed"`
+	Output            hexutil.Bytes `json:"output"`
+	CallCreateType    string        `json:"type"` // ['create', 'suicide', 'call', 'empty']
+	CallType          string        `json:"call_type"`
+	TxID              string        `json:"tx_id"`
+	ParentTraceID     string        `json:"parent_trace_id"`
+	PosInParentTrace  int64         `json:"pos_in_parent_trace"`
+	SelfStorageChange bool          `json:"self_storage_change"`
+	StorageChange     bool          `json:"storage_change"`
 }

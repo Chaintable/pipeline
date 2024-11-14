@@ -51,7 +51,7 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 	return blockNotice, nil
 }
 
-func NewKafkaWriterForBlockNotice(brokers []string, topic string) *kafka.Writer {
+func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
@@ -69,6 +69,21 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 	}
 	err = writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte("NewBlock"),
+		Value: value,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func WriteReplicaStateChange(writer *kafka.Writer, replicaStateChange *types.ReplicaStateChangeNotification) error {
+	value, err := EncodeToJsonGzip(replicaStateChange)
+	if err != nil {
+		return err
+	}
+	err = writer.WriteMessages(context.Background(), kafka.Message{
+		Key:   []byte("ReplicaStateChange"),
 		Value: value,
 	})
 	if err != nil {
