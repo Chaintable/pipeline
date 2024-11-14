@@ -11,6 +11,6 @@ type Block struct {
 	BaseFeePerGas *big.Int `json:"base_fee_per_gas"`
 	Miner         string   `json:"miner"`
 	GasLimit      *big.Int `json:"gas_limit"`
-	Gasused       *big.Int `json:"gas_used"`
+	GasUsed       *big.Int `json:"gas_used"`
 	Timestamp     float64  `json:"timestamp"`
 }
