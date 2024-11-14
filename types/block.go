@@ -12,5 +12,5 @@ type Block struct {
 	Miner         string   `json:"miner"`
 	GasLimit      *big.Int `json:"gas_limit"`
 	GasUsed       *big.Int `json:"gas_used"`
-	Timestamp     float64  `json:"timestamp"`
+	Timestamp     uint64   `json:"timestamp"`
 }
