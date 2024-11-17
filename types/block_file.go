@@ -17,7 +17,7 @@ type BlockFile struct {
 	SpecialTransfers []SpecialTransfer `json:"special_transfers"`
 }
 
-func (bf *BlockFile) ValidationHash() int64 {
+func (bf *BlockFile) Validation() BlockValidation {
 	var ids []string
 
 	// Collect all IDs
@@ -35,7 +35,7 @@ func (bf *BlockFile) ValidationHash() int64 {
 		ids = append(ids, withdrawal.ID)
 	}
 
-	return CalcValidationHash(ids)
+	return BlockValidation{ValidationHash: CalcValidationHash(ids), IsFork: false}
 }
 
 func CalcValidationHash(ids []string) int64 {
@@ -55,4 +55,10 @@ func CalcValidationHash(ids []string) int64 {
 	last8Digits := sha1SumStr[len(sha1SumStr)-8:]
 	validationHash, _ := strconv.ParseInt(last8Digits, 10, 64)
 	return validationHash
+}
+
+// BlockValidation  { 'validation_hash': 12345678, is_fork: false }
+type BlockValidation struct {
+	ValidationHash int64 `json:"validation_hash"`
+	IsFork         bool  `json:"is_fork"`
 }
