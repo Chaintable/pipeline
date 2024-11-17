@@ -12,26 +12,31 @@ type DataFile struct {
 	Data  []byte
 }
 
-// s3key: chain_id/block_height/block_id
+// s3key: chain_id/block_id
 // 外部s3
 func SerializeFile(chainID string, blockFile *types.BlockFile) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(blockFile)
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/%d/%s", chainID, blockFile.Block.Height, blockFile.Block.ID)
+	s3Key := fmt.Sprintf("%s/%s", chainID, blockFile.Block.ID)
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
 	}, nil
 }
 
-// s3key: chain_id/block_height/block_id/validation
+// s3key: chain_id/block_height/block_id
 // 外部s3,empty object,只用key
 func SerializeFileValidation(chainID string, blockFile *types.BlockFile) (*DataFile, error) {
-	s3Key := fmt.Sprintf("%s/%d/%s/%d", chainID, blockFile.Block.Height, blockFile.Block.ID, blockFile.ValidationHash())
+	data, err := util.EncodeToJsonGzip(blockFile.Validation())
+	if err != nil {
+		return nil, err
+	}
+	s3Key := fmt.Sprintf("%s/%d/%s", chainID, blockFile.Block.Height, blockFile.Block.ID, blockFile.Validation())
 	return &DataFile{
 		S3key: s3Key,
+		Data:  data,
 	}, nil
 }
 

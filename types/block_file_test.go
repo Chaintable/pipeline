@@ -12,7 +12,7 @@ func TestBlockFileTest(t *testing.T) {
 		},
 	}
 
-	validationHash := bf.ValidationHash()
+	validationHash := bf.Validation()
 
 	if validationHash != 54217265 {
 		t.Errorf("Expected 54217265 but got %d", validationHash)
