@@ -33,7 +33,7 @@ func SerializeFileValidation(chainID string, blockFile *types.BlockFile) (*DataF
 	if err != nil {
 		return nil, err
 	}
-	s3Key := fmt.Sprintf("%s/%d/%s", chainID, blockFile.Block.Height, blockFile.Block.ID, blockFile.Validation())
+	s3Key := fmt.Sprintf("%s/%d/%s", chainID, blockFile.Block.Height, blockFile.Block.ID)
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
