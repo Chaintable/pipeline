@@ -13,6 +13,7 @@ func NewS3Client(region string) (*s3.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Region = region
 	client := s3.NewFromConfig(cfg)
 	return client, nil
 }
