@@ -3,10 +3,9 @@ package types
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"math/big"
 	"strconv"
-
-	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type BlockFile struct {
@@ -44,9 +43,10 @@ func CalcValidationHash(ids []string) int64 {
 		h := sha1.New()
 		h.Write([]byte(each))
 		hash := hex.EncodeToString(h.Sum(nil))
-		hashInt, err := hexutil.DecodeBig("0x" + hash)
-		if err != nil {
-			panic(err)
+		hashInt := new(big.Int)
+		_, ok := hashInt.SetString(hash, 16)
+		if !ok {
+			panic(fmt.Sprintf("Failed to convert id %s to %s to big.Int", each, hash))
 		}
 		sha1Sum.Add(sha1Sum, hashInt)
 	}
