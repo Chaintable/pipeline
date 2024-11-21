@@ -77,6 +77,21 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 	return nil
 }
 
+func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBlockChangeNotification) error {
+	value, err := EncodeToJsonGzip(outerBlockNotice)
+	if err != nil {
+		return err
+	}
+	err = writer.WriteMessages(context.Background(), kafka.Message{
+		Key:   []byte("NewBlock"),
+		Value: value,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func WriteReplicaStateChange(writer *kafka.Writer, replicaStateChange *types.ReplicaStateChangeNotification) error {
 	value, err := EncodeToJsonGzip(replicaStateChange)
 	if err != nil {
