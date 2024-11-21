@@ -14,7 +14,7 @@ type Trace struct {
 	Input             hexutil.Bytes `json:"input"`
 	To                string        `json:"to_addr"`
 	Value             *hexutil.Big  `json:"value"`
-	GasUsed           *big.Int      `json:"gasUsed"`
+	GasUsed           *big.Int      `json:"gas_used"`
 	Output            hexutil.Bytes `json:"output"`
 	CallCreateType    string        `json:"type"` // ['create', 'suicide', 'call', 'empty']
 	CallType          string        `json:"call_type"`

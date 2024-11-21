@@ -14,11 +14,13 @@ type BlockContext struct {
 	Hash        common.Hash `json:"hash"`
 	ParentHash  common.Hash `json:"parentHash"`
 	BlockNumber uint64      `json:"blockNumber"`
+	Timestamp   uint64      `json:"timestamp"`
 }
 
 type OuterBlockChangeNotification struct {
 	ChainID     int64       `json:"chain_id"`
 	Hash        common.Hash `json:"block_id"`
 	BlockNumber uint64      `json:"block_height"`
+	Timestamp   uint64      `json:"block_timestamp"`
 	IsFork      bool        `json:"is_fork"`
 }
