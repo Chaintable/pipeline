@@ -26,3 +26,17 @@ func UploadFileToS3(uploader *s3.Client, bucket string, key string, data []byte)
 	})
 	return err
 }
+
+func DownloadFileFromS3(downloader *s3.Client, bucket string, key string) ([]byte, error) {
+	output, err := downloader.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer output.Body.Close()
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(output.Body)
+	return buf.Bytes(), nil
+}
