@@ -52,7 +52,7 @@ func CalcValidationHash(ids []string) int64 {
 	}
 
 	sha1SumStr := sha1Sum.String()
-	last8Digits := sha1SumStr[len(sha1SumStr)-8:]
+	last8Digits := sha1SumStr[len(sha1SumStr)-6:]
 	validationHash, _ := strconv.ParseInt(last8Digits, 10, 64)
 	return validationHash
 }

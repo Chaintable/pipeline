@@ -8,9 +8,9 @@ import (
 type Event struct {
 	ID            string        `json:"id"`
 	Address       string        `json:"contract_id"`
+	Selector      string        `json:"selector"`
 	Topics        []string      `json:"topics"`
 	Data          hexutil.Bytes `json:"data"`
-	TxHash        string        `json:"tx_id"`
 	ParentTraceID string        `json:"parent_trace_id"`
 	Position      int64         `json:"pos_in_parent_trace"`
 }
