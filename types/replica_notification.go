@@ -7,8 +7,9 @@ type ReplicaStateChangeNotification struct {
 	ReplicaStates     []ReplicaState `json:"replicaStates"`
 }
 
+// key := "<chainid>/replicaState/<endPoint>"
+// value := json.Marshal(ReplicaState)
 type ReplicaState struct {
-	LatestBlockNumber *hexutil.Big `json:"latestBlockNumber"`
-	StateType         uint64       `json:"stateType"` // 1 latest, 2 delay, 3 offline
-	Meta              string       `json:"meta"`      // 副本元数据，ip等，和网关模块进一步约定
+	LatestBlockNumber uint64 `json:"latestBlockNumber"`
+	EndPoint          string `json:"endPoint"`
 }
