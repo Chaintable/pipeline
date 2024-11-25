@@ -1,15 +1,8 @@
 package types
 
-import "github.com/ethereum/go-ethereum/common/hexutil"
-
-type ReplicaStateChangeNotification struct {
-	LatestBlockNumber *hexutil.Big   `json:"latestBlockNumber"`
-	ReplicaStates     []ReplicaState `json:"replicaStates"`
-}
-
-// key := "<chainid>/replicaState/<endPoint>"
-// value := json.Marshal(ReplicaState)
-type ReplicaState struct {
-	LatestBlockNumber uint64 `json:"latestBlockNumber"`
-	EndPoint          string `json:"endPoint"`
+// key := "replicaState/<chain_id>/available_nodes"
+// value := uitls.EncodeToJsonGzip(AvailableReplicaStates)
+type AvailableReplicaStates struct {
+	LatestConsistencyBlockNumber uint64   `json:"latestConsistencyBlockNumber"` //副本的一致性高度
+	EndPoints                    []string `json:"endPoints"`
 }
