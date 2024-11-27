@@ -10,5 +10,5 @@ type ReplicaStateChangeNotification struct {
 type ReplicaState struct {
 	LatestBlockNumber *hexutil.Big `json:"latestBlockNumber"`
 	StateType         uint64       `json:"stateType"` // 1 latest, 2 delay, 3 offline
-	IP                string       `json:"ip"`        //
+	Address           string       `json:"address"`   //
 }
