@@ -2,15 +2,15 @@ package tracer
 
 import (
 	"fmt"
+
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
-	"sync"
-	"time"
 )
 
 type ExtraInfo struct {
@@ -53,78 +53,56 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	return nil
 }
 
-func OnCommit() {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var uploadErrs []error
-
-	s3start := time.Now()
-
-	// Helper function to handle errors safely
-	handleError := func(err error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if err != nil {
-			uploadErrs = append(uploadErrs, err)
-		}
+func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
+	stateDiff := &ptypes.BlockStorageDiff{}
+	for addrhash := range destructs {
+		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
-
-	// 上传 block head
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := uploadBlockHeader(BlockCtx.BlockHeader)
-		if err != nil {
-			handleError(err)
-			return
-		}
-	}()
-
-	// 上传 state diff
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := uploadBlockDiff(BlockCtx.BlockDiff)
-		if err != nil {
-			handleError(err)
-			return
-		}
-	}()
-
-	// 上传 block file
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := uploadBlockFile(BlockCtx.BlockFile)
-		if err != nil {
-			handleError(err)
-			return
-		}
-	}()
-
-	// 上传 block file validation
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := uploadblockFileValidation(BlockCtx.BlockFile)
-		if err != nil {
-			handleError(err)
-			return
-		}
-	}()
-
-	// 等待所有上传完成
-	wg.Wait()
-	s3Elapsed := time.Since(s3start)
-
-	// 检查是否有错误
-	if len(uploadErrs) > 0 {
-		for _, err := range uploadErrs {
-			log.Error("Upload error", "err", err)
-		}
-		log.Crit("One or more uploads failed")
+	for k, v := range accounts {
+		account, _ := types.FullAccount(v)
+		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
+			Address:  k,
+			Balance:  account.Balance,
+			Nonce:    uint64(account.Nonce),
+			CodeHash: common.BytesToHash(account.CodeHash),
+		})
 	}
-	log.Info("Upload to s3", "elapsed", common.PrettyDuration(s3Elapsed))
+	for account, storage := range storages {
+		Values := make([]ptypes.IndexValuePair, 0, len(storage))
+		for index, v := range storage {
+			value := uint256.NewInt(0)
+			if len(v) > 0 {
+				_, content, _, err := rlp.Split(v)
+				if err != nil {
+					log.Error("Failed to split storage", "err", err)
+				}
+				value = uint256.NewInt(0).SetBytes(content)
+			}
+			Values = append(Values, ptypes.IndexValuePair{
+				Index: index,
+				Value: value,
+			})
+		}
+		stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
+			Address: account,
+			Values:  Values,
+		})
+	}
+	for hash, code := range codes {
+		stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
+			CodeHash: hash,
+			Code:     code,
+		})
+	}
+	if originRoot == (common.Hash{}) {
+		originRoot = types.EmptyRootHash
+	}
+	if root == (common.Hash{}) {
+		root = types.EmptyRootHash
+	}
+	stateDiff.Hash = root
+	stateDiff.ParentHash = originRoot
+	return stateDiff
 }
 
 func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {

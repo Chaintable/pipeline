@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -22,7 +23,7 @@ import (
 // 2. state diff
 // 3. block file
 
-type pipelineTracer struct {
+type PipelineTracer struct {
 	config     pipelineTracerConfig
 	callTracer *callTracer
 }
@@ -36,34 +37,20 @@ type pipelineTracerConfig struct {
 	ChainID          string   `json:"chain_id"`
 }
 
-func NewPipelineTracer(cfg json.RawMessage) (*tracing.Hooks, error) {
+func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 	var config pipelineTracerConfig
 	if cfg != nil {
 		if err := json.Unmarshal(cfg, &config); err != nil {
 			return nil, fmt.Errorf("failed to parse config: %v", err)
 		}
 	}
-	t := &pipelineTracer{
+	t := &PipelineTracer{
 		config: config,
 	}
-
-	return &tracing.Hooks{
-		OnBlockchainInit: t.OnBlockchainInit,
-		OnClose:          t.OnClose,
-		OnBlockStart:     t.OnBlockStart,
-		OnBlockEnd:       t.OnBlockEnd,
-		OnTxStart:        t.OnTxStart,
-		OnTxEnd:          t.OnTxEnd,
-		OnEnter:          t.OnEnter,
-		OnExit:           t.OnExit,
-		OnLog:            t.OnLog,
-		OnOpcode:         t.OnOpcode,
-		OnBalanceChange:  t.OnBalanceChange,
-		OnGenesisBlock:   t.OnGenesisBlock,
-	}, nil
+	return t, nil
 }
 
-func (t *pipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
+func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
 	if t.config.ChainID == "" {
 		log.Crit("ChainID is required")
@@ -74,11 +61,11 @@ func (t *pipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	}
 }
 
-func (t *pipelineTracer) OnClose() {
+func (t *PipelineTracer) OnClose() {
 	NodeXPusher.Close()
 }
 
-func (t *pipelineTracer) OnBlockStart(event tracing.BlockEvent) {
+func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx = &ExtraInfo{
 		BlockNumber: event.Block.Number().Uint64(),
 		BlockHash:   event.Block.Hash(),
@@ -97,7 +84,7 @@ func (t *pipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 
 }
 
-func (t *pipelineTracer) OnBlockEnd(blockErr error) {
+func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
@@ -106,7 +93,7 @@ func (t *pipelineTracer) OnBlockEnd(blockErr error) {
 	}
 }
 
-func (t *pipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
+func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	callTracer := newCallTracerRaw()
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
@@ -114,7 +101,7 @@ func (t *pipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction,
 	BlockCtx.From = from
 }
 
-func (t *pipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
 
@@ -122,35 +109,35 @@ func (t *pipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
-func (t *pipelineTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *PipelineTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	if t.callTracer == nil {
 		return
 	}
 	t.callTracer.OnEnter(depth, typ, from, to, input, gas, value)
 }
 
-func (t *pipelineTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *PipelineTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if t.callTracer == nil {
 		return
 	}
 	t.callTracer.OnExit(depth, output, gasUsed, err, reverted)
 }
 
-func (t *pipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *PipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.callTracer == nil {
 		return
 	}
 	t.callTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
 }
 
-func (t *pipelineTracer) OnLog(log *types.Log) {
+func (t *PipelineTracer) OnLog(log *types.Log) {
 	if t.callTracer == nil {
 		return
 	}
 	t.callTracer.OnLog(log)
 }
 
-func (t *pipelineTracer) OnBalanceChange(a common.Address, prevBalance, newBalance *big.Int, reason tracing.BalanceChangeReason) {
+func (t *PipelineTracer) OnBalanceChange(a common.Address, prevBalance, newBalance *big.Int, reason tracing.BalanceChangeReason) {
 	diff := new(big.Int).Sub(newBalance, prevBalance)
 
 	if reason == tracing.BalanceIncreaseRewardMineUncle || reason == tracing.BalanceIncreaseRewardMineBlock {
@@ -191,7 +178,7 @@ func (t *pipelineTracer) OnBalanceChange(a common.Address, prevBalance, newBalan
 	}
 }
 
-func (t *pipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
@@ -264,4 +251,81 @@ func (t *pipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	}
 
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+}
+
+func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
+	stateDiff := stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+	BlockCtx.BlockDiff = stateDiff
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var uploadErrs []error
+
+	s3start := time.Now()
+
+	// Helper function to handle errors safely
+	handleError := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err != nil {
+			uploadErrs = append(uploadErrs, err)
+		}
+	}
+
+	// 上传 block head
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := uploadBlockHeader(BlockCtx.BlockHeader)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
+	// 上传 state diff
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := uploadBlockDiff(BlockCtx.BlockDiff)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
+	// 上传 block file
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := uploadBlockFile(BlockCtx.BlockFile)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
+	// 上传 block file validation
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := uploadblockFileValidation(BlockCtx.BlockFile)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
+	// 等待所有上传完成
+	wg.Wait()
+	s3Elapsed := time.Since(s3start)
+
+	// 检查是否有错误
+	if len(uploadErrs) > 0 {
+		for _, err := range uploadErrs {
+			log.Error("Upload error", "err", err)
+		}
+		log.Crit("One or more uploads failed")
+	}
+	log.Info("Upload to s3", "elapsed", common.PrettyDuration(s3Elapsed))
 }
