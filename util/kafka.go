@@ -91,18 +91,3 @@ func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBl
 	}
 	return nil
 }
-
-func WriteReplicaStateChange(writer *kafka.Writer, replicaStateChange *types.ReplicaStateChangeNotification) error {
-	value, err := EncodeToJsonGzip(replicaStateChange)
-	if err != nil {
-		return err
-	}
-	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:   []byte("ReplicaStateChange"),
-		Value: value,
-	})
-	if err != nil {
-		return err
-	}
-	return nil
-}

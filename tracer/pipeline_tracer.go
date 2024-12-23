@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Chaintable/pipeline/metrics"
+
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/ethereum/go-ethereum/common"
@@ -81,6 +83,7 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	}
 	BlockCtx.Tx = nil
 	BlockCtx.From = common.Address{}
+	BlockCtx.BlockStartTime = time.Now()
 
 }
 
@@ -91,6 +94,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 		NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
 		log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 	}
+	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
@@ -99,9 +103,13 @@ func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction,
 	t.callTracer.OnTxStart(vm, tx, from)
 	BlockCtx.Tx = tx
 	BlockCtx.From = from
+	BlockCtx.TxStartTime = time.Now()
 }
 
 func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	defer func() {
+		metrics.BlockTxExecutionTimer.UpdateSince(BlockCtx.TxStartTime)
+	}()
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
 
@@ -320,6 +328,8 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Wait()
 	s3Elapsed := time.Since(s3start)
 
+	metrics.BlockUploadTimer.UpdateSince(s3start)
+
 	// 检查是否有错误
 	if len(uploadErrs) > 0 {
 		for _, err := range uploadErrs {
@@ -328,4 +338,6 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		log.Crit("One or more uploads failed")
 	}
 	log.Info("Upload to s3", "elapsed", common.PrettyDuration(s3Elapsed))
+
+	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
 }

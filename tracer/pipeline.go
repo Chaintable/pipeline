@@ -2,7 +2,9 @@ package tracer
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -22,6 +24,9 @@ type ExtraInfo struct {
 	BlockHeader *ptypes.Header
 	BlockDiff   *ptypes.BlockStorageDiff
 	BlockChange *ptypes.BlockChangeNotification
+	// metrics timer
+	TxStartTime    time.Time
+	BlockStartTime time.Time
 }
 
 type Config struct {
@@ -144,6 +149,10 @@ func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStora
 }
 
 func uploadBlockHeader(blockHeader *ptypes.Header) error {
+	start := time.Now()
+	defer func() {
+		metrics.BlockHeaderUploadTimer.UpdateSince(start)
+	}()
 	s3BlockFile, err := processor.SerializeHeader(BizChainID, blockHeader)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block header: %v", err)
@@ -156,6 +165,10 @@ func uploadBlockHeader(blockHeader *ptypes.Header) error {
 }
 
 func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
+	start := time.Now()
+	defer func() {
+		metrics.StateDiffUploadTimer.UpdateSince(start)
+	}()
 	s3file, err := processor.SerializeStateDiff(BizChainID, blockDiff)
 	if err != nil {
 		return fmt.Errorf("failed to serialize state diff: %v", err)
@@ -168,6 +181,10 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 }
 
 func uploadBlockFile(blockFile *ptypes.BlockFile) error {
+	start := time.Now()
+	defer func() {
+		metrics.BlockFileUploadTimer.UpdateSince(start)
+	}()
 	s3file, err := processor.SerializeFile(BizChainID, blockFile)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file: %v", err)
@@ -180,6 +197,10 @@ func uploadBlockFile(blockFile *ptypes.BlockFile) error {
 }
 
 func uploadblockFileValidation(blockFile *ptypes.BlockFile) error {
+	start := time.Now()
+	defer func() {
+		metrics.BlockFileValidationTimer.UpdateSince(start)
+	}()
 	blockFileValidation, err := processor.SerializeFileValidation(BizChainID, blockFile)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file validation: %v", err)
