@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Chaintable/pipeline/metrics"
+
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -127,6 +129,11 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 		}
 	}
 
+	start := time.Now()
+	defer func() {
+		metrics.BlockPushTimer.UpdateSince(start)
+
+	}()
 	// 将区块变更通知写入Kafka
 	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice)
 	if err != nil {
@@ -135,6 +142,7 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 
 	// 更新最新的区块通知
 	p.LastBlockNotice = blockNotice
+	metrics.LatestPushedBlockNumber.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber))
 	return nil
 }
 
