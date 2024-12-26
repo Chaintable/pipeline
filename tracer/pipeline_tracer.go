@@ -267,8 +267,12 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 }
 
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
-	stateDiff := stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
-	BlockCtx.BlockDiff = stateDiff
+	if originRoot != root {
+		stateDiff := stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+		BlockCtx.BlockDiff = stateDiff
+	} else {
+		BlockCtx.BlockDiff = nil
+	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -300,6 +304,9 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if BlockCtx.BlockDiff == nil {
+			return
+		}
 		err := uploadBlockDiff(BlockCtx.BlockDiff)
 		if err != nil {
 			handleError(err)
