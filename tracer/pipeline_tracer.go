@@ -84,10 +84,15 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.Tx = nil
 	BlockCtx.From = common.Address{}
 	BlockCtx.BlockStartTime = time.Now()
-
+	BlockCtx.Committed = false
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
+	// empty block process
+	if !BlockCtx.Committed {
+		t.OnCommit(BlockCtx.BlockHeader.StateRoot, BlockCtx.BlockHeader.StateRoot, nil, nil, nil, nil, nil, nil)
+	}
+
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
@@ -338,6 +343,8 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		log.Crit("One or more uploads failed")
 	}
 	log.Info("Upload to s3", "elapsed", common.PrettyDuration(s3Elapsed))
+
+	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
 }

@@ -24,6 +24,7 @@ type ExtraInfo struct {
 	BlockHeader *ptypes.Header
 	BlockDiff   *ptypes.BlockStorageDiff
 	BlockChange *ptypes.BlockChangeNotification
+	Committed   bool
 	// metrics timer
 	TxStartTime    time.Time
 	BlockStartTime time.Time
