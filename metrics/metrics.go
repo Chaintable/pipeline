@@ -7,6 +7,8 @@ import (
 var (
 	LatestUploadedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_uploaded_block_number", nil)
 
+	NodeInfo = metrics.NewRegisteredGaugeInfo("pipeline/node_info", nil)
+
 	LatestPushedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_pushed_block_number", nil)
 
 	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
