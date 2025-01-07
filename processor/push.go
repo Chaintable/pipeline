@@ -89,30 +89,27 @@ func (p *PushProcessor) uploadWork() error {
 			continue
 		}
 
-		fileName := file.Name()
-		if strings.HasSuffix(fileName, ".tmp") {
-			fullPath := filepath.Join(p.S3TempDir, fileName)
+		fullPath := filepath.Join(p.S3TempDir, file.Name())
 
-			// 读取文件内容
-			data, err := os.ReadFile(fullPath)
-			if err != nil {
-				return err
-			}
+		// 读取文件内容
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return err
+		}
 
-			// replace - to /
-			s3Key := strings.ReplaceAll(fileName, "-", "/")
-			err = p.UploadFileToS3(&DataFile{
-				S3key: s3Key,
-				Data:  data,
-			})
-			if err != nil {
-				return err
-			}
-			// remove tmp file
-			err = os.Remove(fullPath)
-			if err != nil {
-				return err
-			}
+		// replace - to /
+		s3Key := strings.ReplaceAll(file.Name(), "-", "/")
+		err = p.UploadFileToS3(&DataFile{
+			S3key: s3Key,
+			Data:  data,
+		})
+		if err != nil {
+			return err
+		}
+		// remove tmp file
+		err = os.Remove(fullPath)
+		if err != nil {
+			return err
 		}
 	}
 	go func() {
@@ -127,7 +124,7 @@ func (p *PushProcessor) uploadWork() error {
 						log.Printf("failed to upload files to s3: %v", err)
 						panic(err)
 					}
-					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"), ".tmp")
+					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"))
 					err = os.Remove(localfilePath)
 					if err != nil {
 						log.Printf("failed to remove tmp file: %v", err)
@@ -141,7 +138,7 @@ func (p *PushProcessor) uploadWork() error {
 
 func (p *PushProcessor) UploadFile(dataFile *DataFile) error {
 	if p.S3TempDir != "" {
-		localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"), ".tmp")
+		localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"))
 		err := os.WriteFile(localfilePath, dataFile.Data, 0644)
 		if err != nil {
 			log.Printf("failed to write file: %v", err)
