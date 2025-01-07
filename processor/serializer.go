@@ -10,6 +10,7 @@ import (
 type DataFile struct {
 	S3key string
 	Data  []byte
+	Kind  string
 }
 
 // s3key: chain_id/block_id
@@ -23,6 +24,7 @@ func SerializeFile(chainID string, blockFile *types.BlockFile) (*DataFile, error
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
+		Kind:  "block_file",
 	}, nil
 }
 
@@ -37,6 +39,7 @@ func SerializeFileValidation(chainID string, blockFile *types.BlockFile) (*DataF
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
+		Kind:  "block_file_validation",
 	}, nil
 }
 
@@ -51,6 +54,7 @@ func SerializeHeader(chainID string, header *types.Header) (*DataFile, error) {
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
+		Kind:  "block_header",
 	}, nil
 }
 
@@ -65,5 +69,6 @@ func SerializeStateDiff(chainID string, stateDiff *types.BlockStorageDiff) (*Dat
 	return &DataFile{
 		S3key: s3Key,
 		Data:  data,
+		Kind:  "state_diff",
 	}, nil
 }

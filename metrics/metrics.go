@@ -15,8 +15,6 @@ var (
 
 	BlockTxExecutionTimer = metrics.NewRegisteredResettingTimer("pipeline/tx_execution", nil)
 
-	BlockUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_upload", nil)
-
 	BlockHeaderUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_header_upload", nil)
 
 	StateDiffUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/state_diff_upload", nil)

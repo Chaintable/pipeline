@@ -3,6 +3,9 @@ package processor
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,9 +24,12 @@ type PushProcessor struct {
 	KafkaReader     *kafka.Reader
 	KafkaWriter     *kafka.Writer
 	LastBlockNotice *types.BlockChangeNotification
+	S3TempDir       string
+	quitCh          chan struct{}
+	S3DataCh        chan *DataFile
 }
 
-func NewPushProcessor(region string, bucket string, brokers []string, topic string) (*PushProcessor, error) {
+func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string) (*PushProcessor, error) {
 	kafkaReader := util.NewKafkaReader(brokers, topic, "")
 	kafkaWriter := util.NewKafkaWriter(brokers, topic)
 	s3Uploader, err := util.NewS3Client(region)
@@ -44,13 +50,113 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		KafkaReader:     kafkaReader,
 		KafkaWriter:     kafkaWriter,
 		LastBlockNotice: lastBlockNotice,
+		S3TempDir:       s3TempDir,
+		quitCh:          make(chan struct{}),
+		S3DataCh:        make(chan *DataFile, 100),
 	}, nil
 }
 
+func (p *PushProcessor) uploadWork() error {
+	files, err := os.ReadDir(p.S3TempDir)
+	if err != nil {
+		log.Printf("读取目录出错: %v", err)
+		return nil
+	}
+	for _, file := range files {
+		// 如果是文件夹，跳过
+		if file.IsDir() {
+			continue
+		}
+
+		fileName := file.Name()
+		if strings.HasSuffix(fileName, ".tmp") {
+			fullPath := filepath.Join(p.S3TempDir, fileName)
+
+			// 读取文件内容
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				return err
+			}
+
+			// replace - to /
+			s3Key := strings.ReplaceAll(fileName, "-", "/")
+			err = p.UploadFileToS3(&DataFile{
+				S3key: s3Key,
+				Data:  data,
+			})
+			if err != nil {
+				return err
+			}
+			// remove tmp file
+			err = os.Remove(fullPath)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	go func() {
+		for {
+			select {
+			case <-p.quitCh:
+				return
+			case dataFile := <-p.S3DataCh:
+				go func() {
+					err = p.UploadFileToS3(dataFile)
+					if err != nil {
+						log.Printf("failed to upload files to s3: %v", err)
+						panic(err)
+					}
+					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"), ".tmp")
+					err = os.Remove(localfilePath)
+					if err != nil {
+						log.Printf("failed to remove tmp file: %v", err)
+					}
+				}()
+			}
+		}
+	}()
+	return nil
+}
+
+func (p *PushProcessor) UploadFile(dataFile *DataFile) error {
+	if p.S3TempDir != "" {
+		localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"), ".tmp")
+		err := os.WriteFile(localfilePath, dataFile.Data, 0644)
+		if err != nil {
+			log.Printf("failed to write file: %v", err)
+			return err
+		}
+		p.S3DataCh <- dataFile
+		return nil
+	} else {
+		return p.UploadFileToS3(dataFile)
+	}
+}
+
 func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
+	start := time.Now()
+	var err error
+	defer func() {
+		if err != nil {
+			log.Printf("failed to upload file to s3: %v", err)
+			return
+		}
+		if file.Kind == "block_file" {
+			metrics.BlockFileUploadTimer.UpdateSince(start)
+		}
+		if file.Kind == "block_file_validation" {
+			metrics.BlockFileValidationTimer.UpdateSince(start)
+		}
+		if file.Kind == "block_header" {
+			metrics.BlockHeaderUploadTimer.UpdateSince(start)
+		}
+		if file.Kind == "state_diff" {
+			metrics.StateDiffUploadTimer.UpdateSince(start)
+		}
+	}()
 	times := 0
 	for {
-		err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
+		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
 		if err != nil {
 			if times > 3 {
 				return err
@@ -149,4 +255,5 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 func (p *PushProcessor) Close() {
 	p.KafkaReader.Close()
 	p.KafkaWriter.Close()
+	close(p.quitCh)
 }

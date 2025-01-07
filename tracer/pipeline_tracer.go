@@ -36,6 +36,7 @@ type pipelineTracerConfig struct {
 	ChainTableBucket string   `json:"chain_table_bucket"`
 	Brokers          []string `json:"brokers"`
 	Topic            string   `json:"topic"`
+	S3TempDir        string   `json:"s3_temp_dir"`
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -53,7 +54,7 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
-	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String())
+	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.S3TempDir)
 	if err != nil {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
@@ -278,8 +279,6 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	var mu sync.Mutex
 	var uploadErrs []error
 
-	s3start := time.Now()
-
 	// Helper function to handle errors safely
 	handleError := func(err error) {
 		mu.Lock()
@@ -338,9 +337,8 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 
 	// 等待所有上传完成
 	wg.Wait()
-	s3Elapsed := time.Since(s3start)
 
-	metrics.BlockUploadTimer.UpdateSince(s3start)
+	log.Info("Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
 
 	// 检查是否有错误
 	if len(uploadErrs) > 0 {
@@ -349,7 +347,6 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		}
 		log.Crit("One or more uploads failed")
 	}
-	log.Info("Upload to s3", "elapsed", common.PrettyDuration(s3Elapsed))
 
 	BlockCtx.Committed = true
 
