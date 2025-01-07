@@ -36,7 +36,6 @@ type pipelineTracerConfig struct {
 	ChainTableBucket string   `json:"chain_table_bucket"`
 	Brokers          []string `json:"brokers"`
 	Topic            string   `json:"topic"`
-	ChainID          string   `json:"chain_id"`
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -54,15 +53,12 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
-	if t.config.ChainID == "" {
-		log.Crit("ChainID is required")
-	}
-	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, t.config.ChainID)
+	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String())
 	if err != nil {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
 	metrics.NodeInfo.Update(map[string]string{
-		"chain_id": t.config.ChainID,
+		"chain_id": chainConfig.ChainID.String(),
 		"role":     "writer",
 	})
 }
