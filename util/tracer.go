@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -27,6 +28,7 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 	if rawBlock.Header().BaseFee != nil {
 		block.BaseFeePerGas = rawBlock.Header().BaseFee
 	}
+	log.Info("start BuildPipelineBlock", "block", block)
 	return block
 }
 
