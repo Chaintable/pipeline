@@ -44,7 +44,11 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		return nil, err
 	}
 
-	return &PushProcessor{
+	if s3TempDir != "" {
+		s3TempDir = filepath.Join(s3TempDir, bucket)
+	}
+
+	pusher := &PushProcessor{
 		Bucket:          bucket,
 		Uploader:        s3Uploader,
 		KafkaReader:     kafkaReader,
@@ -53,13 +57,24 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		S3TempDir:       s3TempDir,
 		quitCh:          make(chan struct{}),
 		S3DataCh:        make(chan *DataFile, 100),
-	}, nil
+	}
+
+	if s3TempDir != "" {
+		err = pusher.uploadWork()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pusher, nil
 }
 
 func (p *PushProcessor) uploadWork() error {
+	if !os.IsExist(os.MkdirAll(p.S3TempDir, 0755)) {
+		return fmt.Errorf("failed to create s3 temp dir: %s", p.S3TempDir)
+	}
 	files, err := os.ReadDir(p.S3TempDir)
 	if err != nil {
-		log.Printf("读取目录出错: %v", err)
+		log.Printf("failed to read dir: %v", err)
 		return nil
 	}
 	for _, file := range files {
@@ -137,6 +152,7 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 	start := time.Now()
 	var err error
 	defer func() {
+		log.Printf("upload file to s3: %s, time: %v", file.S3key, time.Since(start))
 		if err != nil {
 			log.Printf("failed to upload file to s3: %v", err)
 			return
