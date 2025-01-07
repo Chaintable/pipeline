@@ -36,7 +36,6 @@ type Config struct {
 	ChainTableBucket string   `json:"chain_table_bucket"`
 	Brokers          []string `json:"brokers"`
 	Topic            string   `json:"topic"`
-	ChainID          string   `json:"chain_id"`
 }
 
 var (

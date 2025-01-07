@@ -2,24 +2,27 @@ package util
 
 import (
 	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"math/big"
-	"strings"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 	block := ptypes.Block{
-		ID:            rawBlock.Hash().Hex(),
-		Height:        rawBlock.Number(),
-		ParentID:      rawBlock.ParentHash().Hex(),
-		BaseFeePerGas: big.NewInt(0),
-		Miner:         strings.ToLower(rawBlock.Coinbase().Hex()),
-		GasLimit:      big.NewInt(int64(rawBlock.GasLimit())),
-		GasUsed:       big.NewInt(int64(rawBlock.GasUsed())),
-		Timestamp:     rawBlock.Time(),
+		ID:                    rawBlock.Hash().Hex(),
+		Height:                rawBlock.Number(),
+		ParentID:              rawBlock.ParentHash().Hex(),
+		BaseFeePerGas:         big.NewInt(0),
+		Miner:                 strings.ToLower(rawBlock.Coinbase().Hex()),
+		GasLimit:              big.NewInt(int64(rawBlock.GasLimit())),
+		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
+		Timestamp:             rawBlock.Time(),
+		ProcessStartTimestamp: time.Now().UnixMilli(),
 	}
 	if rawBlock.Header().BaseFee != nil {
 		block.BaseFeePerGas = rawBlock.Header().BaseFee
