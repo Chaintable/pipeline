@@ -69,9 +69,15 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 }
 
 func (p *PushProcessor) uploadWork() error {
-	if !os.IsExist(os.MkdirAll(p.S3TempDir, 0755)) {
-		return fmt.Errorf("failed to create s3 temp dir: %s", p.S3TempDir)
+	// check p.S3TempDir is exist, create if not exist
+	if _, err := os.Stat(p.S3TempDir); os.IsNotExist(err) {
+		err = os.MkdirAll(p.S3TempDir, 0755)
+		if err != nil {
+			log.Printf("failed to create dir: %v", err)
+			return err
+		}
 	}
+
 	files, err := os.ReadDir(p.S3TempDir)
 	if err != nil {
 		log.Printf("failed to read dir: %v", err)
