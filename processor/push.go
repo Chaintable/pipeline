@@ -155,7 +155,6 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 	start := time.Now()
 	var err error
 	defer func() {
-		log.Printf("upload file to s3: %s, time: %v", file.S3key, time.Since(start))
 		if err != nil {
 			log.Printf("failed to upload file to s3: %v", err)
 			return
