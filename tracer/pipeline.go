@@ -30,14 +30,6 @@ type ExtraInfo struct {
 	BlockStartTime time.Time
 }
 
-type Config struct {
-	Region           string   `json:"region"`
-	NodeXBucket      string   `json:"node_x_bucket"`
-	ChainTableBucket string   `json:"chain_table_bucket"`
-	Brokers          []string `json:"brokers"`
-	Topic            string   `json:"topic"`
-}
-
 var (
 	NodeXPusher            *processor.PushProcessor
 	ChainTableBucketPusher *processor.PushProcessor
@@ -45,12 +37,12 @@ var (
 	BizChainID             string
 )
 
-func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string) (err error) {
-	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic)
+func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string) (err error) {
+	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
-	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic)
+	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
@@ -157,7 +149,7 @@ func uploadBlockHeader(blockHeader *ptypes.Header) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize block header: %v", err)
 	}
-	err = NodeXPusher.UploadFileToS3(s3BlockFile)
+	err = NodeXPusher.UploadFile(s3BlockFile)
 	if err != nil {
 		return fmt.Errorf("failed to upload block header: %v", err)
 	}
@@ -173,7 +165,7 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize state diff: %v", err)
 	}
-	err = NodeXPusher.UploadFileToS3(s3file)
+	err = NodeXPusher.UploadFile(s3file)
 	if err != nil {
 		return fmt.Errorf("failed to upload state diff: %v", err)
 	}
@@ -181,15 +173,11 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 }
 
 func uploadBlockFile(blockFile *ptypes.BlockFile) error {
-	start := time.Now()
-	defer func() {
-		metrics.BlockFileUploadTimer.UpdateSince(start)
-	}()
 	s3file, err := processor.SerializeFile(BizChainID, blockFile)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file: %v", err)
 	}
-	err = ChainTableBucketPusher.UploadFileToS3(s3file)
+	err = ChainTableBucketPusher.UploadFile(s3file)
 	if err != nil {
 		return fmt.Errorf("failed to upload block file: %v", err)
 	}
@@ -205,7 +193,7 @@ func uploadblockFileValidation(blockFile *ptypes.BlockFile) error {
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file validation: %v", err)
 	}
-	err = ChainTableBucketPusher.UploadFileToS3(blockFileValidation)
+	err = ChainTableBucketPusher.UploadFile(blockFileValidation)
 	if err != nil {
 		return fmt.Errorf("failed to upload block file validation: %v", err)
 	}
