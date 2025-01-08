@@ -2,8 +2,9 @@ package util
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
+
+	"github.com/klauspost/compress/gzip"
 
 	"github.com/ethereum/go-ethereum/rlp"
 )
