@@ -5,11 +5,13 @@ import (
 )
 
 var (
+	LatestBlockNumber = metrics.NewRegisteredGauge("pipeline/block_num", nil)
+
+	LatestBlockTime = metrics.NewRegisteredGauge("pipeline/block_time", nil)
+
 	LatestUploadedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_uploaded_block_number", nil)
 
 	NodeInfo = metrics.NewRegisteredGaugeInfo("pipeline/node_info", nil)
-
-	LatestPushedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_pushed_block_number", nil)
 
 	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
 
