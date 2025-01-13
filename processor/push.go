@@ -266,7 +266,8 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 
 	// 更新最新的区块通知
 	p.LastBlockNotice = blockNotice
-	metrics.LatestPushedBlockNumber.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber))
+	metrics.LatestBlockNumber.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber))
+	metrics.LatestBlockTime.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].Timestamp))
 	return nil
 }
 
