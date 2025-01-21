@@ -98,7 +98,11 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
 		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
-		log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)), "err", err)
+		if err == nil {
+			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
+		} else {
+			log.Error("Failed to push kafka", "err", err, "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks)
+		}
 	}
 	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
 }
