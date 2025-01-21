@@ -267,12 +267,12 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	}
 
 	if p.LastPushedBlock() != nil {
-		if p.LastBlockNotice.ChangeType == 1 {
+		if blockNotice.ChangeType == 1 {
 			if p.LastPushedBlock().Hash != blockNotice.NewBlocks[0].ParentHash {
 				return fmt.Errorf("last pushed block hash is not equal to new block parent hash")
 			}
 		}
-		if p.LastBlockNotice.ChangeType == 2 {
+		if blockNotice.ChangeType == 2 {
 			if p.LastPushedBlock().Hash != blockNotice.DropBlocks[len(blockNotice.DropBlocks)-1].Hash {
 				return fmt.Errorf("last pushed block hash is not equal to drop block hash")
 			}
