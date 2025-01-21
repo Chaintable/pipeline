@@ -231,6 +231,32 @@ func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
 }
 
 func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification) error {
+	if len(blockNotice.NewBlocks) > 1 {
+		// 1. 首先检查 newBlocks 是否满足我们想要的严格顺序和父子关系
+		valid := true
+		for i := 0; i < len(blockNotice.NewBlocks)-1; i++ {
+			current := blockNotice.NewBlocks[i]
+			next := blockNotice.NewBlocks[i+1]
+
+			// 2. 检查区块高度是否递增
+			if current.BlockNumber+1 != next.BlockNumber {
+				valid = false
+				log.Printf("block number not in strict order: %d, %d", current.BlockNumber, next.BlockNumber)
+				break
+			}
+
+			// 3. 检查当前区块的哈希是否匹配下一个区块的父哈希
+			if current.Hash != next.ParentHash {
+				valid = false
+				log.Printf("parent hash not match: %s, %s", current.Hash, next.ParentHash)
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("new blocks not in strict order or parent-child relationship")
+		}
+	}
+
 	if p.LastPushedBlock() == nil && blockNotice.NewBlocks[0].BlockNumber != 0 {
 		return fmt.Errorf("last pushed block is empty but new block number is not 0")
 	}
