@@ -75,6 +75,7 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	}
 	BlockCtx.BlockDiff = &ptypes.BlockStorageDiff{}
 	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(event.Block)
+	BlockCtx.RawBlock = event.Block
 	BlockCtx.BlockFile = &ptypes.BlockFile{
 		Block:            util.BuildPipelineBlock(event.Block),
 		SpecialTransfers: util.BuildPipelineWithdrawals(event.Block),
@@ -86,6 +87,8 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.From = common.Address{}
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
+	BlockCtx.AccountLoads = make(map[common.Address]struct{})
+	BlockCtx.StorageLoads = make(map[common.Address]map[common.Hash]struct{})
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
@@ -339,6 +342,44 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		}
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		if len(BlockCtx.AccountLoads) == 0 && len(BlockCtx.StorageLoads) == 0 {
+			return
+		}
+		blockStateLoad := &ptypes.BlockLoad{}
+		for addr := range BlockCtx.AccountLoads {
+			blockStateLoad.AccountLoads = append(blockStateLoad.AccountLoads, addr)
+		}
+		for addr, keys := range BlockCtx.StorageLoads {
+			stateLoad := &ptypes.AccountStorageLoad{
+				Address: addr,
+			}
+			for key := range keys {
+				stateLoad.Keys = append(stateLoad.Keys, key)
+			}
+			blockStateLoad.StorageLoads = append(blockStateLoad.StorageLoads, *stateLoad)
+		}
+		err := uploadBlockStateLoad(blockStateLoad)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		err := uploadRawBlock(BlockCtx.RawBlock)
+		if err != nil {
+			handleError(err)
+			return
+		}
+	}()
+
 	// 等待所有上传完成
 	wg.Wait()
 
@@ -355,4 +396,15 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
+}
+
+func (t *PipelineTracer) OnAccountRead(addr common.Address) {
+	BlockCtx.AccountLoads[addr] = struct{}{}
+}
+
+func (t *PipelineTracer) OnStorageRead(addr common.Address, key common.Hash) {
+	if _, ok := BlockCtx.StorageLoads[addr]; !ok {
+		BlockCtx.StorageLoads[addr] = make(map[common.Hash]struct{})
+	}
+	BlockCtx.StorageLoads[addr][key] = struct{}{}
 }
