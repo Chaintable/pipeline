@@ -349,7 +349,9 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		if len(BlockCtx.AccountLoads) == 0 && len(BlockCtx.StorageLoads) == 0 {
 			return
 		}
-		blockStateLoad := &ptypes.BlockLoad{}
+		blockStateLoad := &ptypes.BlockLoad{
+			Hash: BlockCtx.RawBlock.Hash(),
+		}
 		for addr := range BlockCtx.AccountLoads {
 			blockStateLoad.AccountLoads = append(blockStateLoad.AccountLoads, addr)
 		}
