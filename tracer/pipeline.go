@@ -175,6 +175,39 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 	return nil
 }
 
+func uploadBlockStateLoad(stateLoad *ptypes.BlockLoad) error {
+	start := time.Now()
+	defer func() {
+		metrics.BlockStateLoadTimer.UpdateSince(start)
+	}()
+
+	blockStateLoad, err := processor.SerializeBlockStateLoad(BizChainID, stateLoad)
+	if err != nil {
+		return fmt.Errorf("failed to serialize block state load: %v", err)
+	}
+	err = NodeXPusher.UploadFile(blockStateLoad)
+	if err != nil {
+		return fmt.Errorf("failed to upload block state load: %v", err)
+	}
+	return nil
+}
+
+func uploadRawBlock(rawBlock *types.Block) error {
+	start := time.Now()
+	defer func() {
+		metrics.BlockRawUploadTimer.UpdateSince(start)
+	}()
+	blockFile, err := processor.SerializeRawBlock(BizChainID, rawBlock)
+	if err != nil {
+		return fmt.Errorf("failed to serialize raw block: %v", err)
+	}
+	err = NodeXPusher.UploadFile(blockFile)
+	if err != nil {
+		return fmt.Errorf("failed to upload raw block: %v", err)
+	}
+	return nil
+}
+
 func uploadBlockFile(blockFile *ptypes.BlockFile) error {
 	s3file, err := processor.SerializeFile(BizChainID, blockFile)
 	if err != nil {
@@ -199,39 +232,6 @@ func uploadblockFileValidation(blockFile *ptypes.BlockFile) error {
 	err = ChainTableBucketPusher.UploadFile(blockFileValidation)
 	if err != nil {
 		return fmt.Errorf("failed to upload block file validation: %v", err)
-	}
-	return nil
-}
-
-func uploadBlockStateLoad(stateLoad *ptypes.BlockLoad) error {
-	start := time.Now()
-	defer func() {
-		metrics.BlockStateLoadTimer.UpdateSince(start)
-	}()
-
-	blockStateLoad, err := processor.SerializeBlockStateLoad(BizChainID, stateLoad)
-	if err != nil {
-		return fmt.Errorf("failed to serialize block state load: %v", err)
-	}
-	err = ChainTableBucketPusher.UploadFile(blockStateLoad)
-	if err != nil {
-		return fmt.Errorf("failed to upload block state load: %v", err)
-	}
-	return nil
-}
-
-func uploadRawBlock(rawBlock *types.Block) error {
-	start := time.Now()
-	defer func() {
-		metrics.BlockRawUploadTimer.UpdateSince(start)
-	}()
-	blockFile, err := processor.SerializeRawBlock(BizChainID, rawBlock)
-	if err != nil {
-		return fmt.Errorf("failed to serialize raw block: %v", err)
-	}
-	err = ChainTableBucketPusher.UploadFile(blockFile)
-	if err != nil {
-		return fmt.Errorf("failed to upload raw block: %v", err)
 	}
 	return nil
 }
