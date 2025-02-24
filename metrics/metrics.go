@@ -25,5 +25,9 @@ var (
 
 	BlockFileValidationTimer = metrics.NewRegisteredResettingTimer("pipeline/block_file_validation", nil)
 
+	BlockStateLoadTimer = metrics.NewRegisteredResettingTimer("pipeline/state_load_upload", nil)
+
+	BlockRawUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_raw_upload", nil)
+
 	BlockPushTimer = metrics.NewRegisteredResettingTimer("pipeline/block_push", nil)
 )
