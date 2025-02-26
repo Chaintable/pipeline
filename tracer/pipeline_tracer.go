@@ -126,7 +126,7 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
 
-	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From)
+	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.RawBlock.BaseFee())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
