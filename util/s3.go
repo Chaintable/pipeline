@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -39,4 +40,20 @@ func DownloadFileFromS3(downloader *s3.Client, bucket string, key string) ([]byt
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(output.Body)
 	return buf.Bytes(), nil
+}
+
+func DownloadFileFromS3Json(downloader *s3.Client, bucket string, key string, target any) error {
+	b, err := DownloadFileFromS3(downloader, bucket, key)
+	if err != nil {
+		return fmt.Errorf("failed to download file from S3: %w", err)
+	}
+	return DecodeFromGzipJson(b, target)
+}
+
+func DownloadFileFromS3Rlp(downloader *s3.Client, bucket string, key string, target any) error {
+	b, err := DownloadFileFromS3(downloader, bucket, key)
+	if err != nil {
+		return fmt.Errorf("failed to download file from S3: %w", err)
+	}
+	return DecodeFromRlp(b, target)
 }
