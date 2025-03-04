@@ -16,18 +16,15 @@ import (
 )
 
 type ExtraInfo struct {
-	BlockNumber  uint64
-	BlockHash    common.Hash
-	BlockFile    *ptypes.BlockFile
-	Tx           *types.Transaction
-	From         common.Address
-	BlockHeader  *ptypes.Header
-	BlockDiff    *ptypes.BlockStorageDiff
-	BlockChange  *ptypes.BlockChangeNotification
-	AccountLoads map[common.Address]struct{}
-	StorageLoads map[common.Address]map[common.Hash]struct{}
-	RawBlock     *types.Block
-	Committed    bool
+	BlockNumber uint64
+	BlockHash   common.Hash
+	BlockFile   *ptypes.BlockFile
+	Tx          *types.Transaction
+	From        common.Address
+	BlockHeader *ptypes.Header
+	BlockDiff   *ptypes.BlockStorageDiff
+	BlockChange *ptypes.BlockChangeNotification
+	Committed   bool
 	// metrics timer
 	TxStartTime    time.Time
 	BlockStartTime time.Time
@@ -171,39 +168,6 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 	err = NodeXPusher.UploadFile(s3file)
 	if err != nil {
 		return fmt.Errorf("failed to upload state diff: %v", err)
-	}
-	return nil
-}
-
-func uploadBlockStateLoad(stateLoad *ptypes.BlockLoad) error {
-	start := time.Now()
-	defer func() {
-		metrics.BlockStateLoadTimer.UpdateSince(start)
-	}()
-
-	blockStateLoad, err := processor.SerializeBlockStateLoad(BizChainID, stateLoad)
-	if err != nil {
-		return fmt.Errorf("failed to serialize block state load: %v", err)
-	}
-	err = NodeXPusher.UploadFile(blockStateLoad)
-	if err != nil {
-		return fmt.Errorf("failed to upload block state load: %v", err)
-	}
-	return nil
-}
-
-func uploadRawBlock(rawBlock *types.Block) error {
-	start := time.Now()
-	defer func() {
-		metrics.BlockRawUploadTimer.UpdateSince(start)
-	}()
-	blockFile, err := processor.SerializeRawBlock(BizChainID, rawBlock)
-	if err != nil {
-		return fmt.Errorf("failed to serialize raw block: %v", err)
-	}
-	err = NodeXPusher.UploadFile(blockFile)
-	if err != nil {
-		return fmt.Errorf("failed to upload raw block: %v", err)
 	}
 	return nil
 }

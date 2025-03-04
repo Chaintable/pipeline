@@ -1,13 +1,10 @@
 package processor
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-
-	gtype "github.com/ethereum/go-ethereum/core/types"
 )
 
 type DataFile struct {
@@ -73,33 +70,5 @@ func SerializeStateDiff(chainID string, stateDiff *types.BlockStorageDiff) (*Dat
 		S3key: s3Key,
 		Data:  data,
 		Kind:  "state_diff",
-	}, nil
-}
-
-// s3Key: <chainID>/<blockHash>/stateLoad
-// 内部s3
-func SerializeBlockStateLoad(chainID string, blockStateLoad *types.BlockLoad) (*DataFile, error) {
-	data, err := util.EncodeToJsonGzip(blockStateLoad)
-	if err != nil {
-		return nil, err
-	}
-	s3Key := fmt.Sprintf("%s/%s/stateLoad", chainID, blockStateLoad.Hash.Hex())
-	return &DataFile{
-		S3key: s3Key,
-		Data:  data,
-		Kind:  "state_load",
-	}, nil
-}
-
-// s3Key: <chainID>/<blockHash>/rawBlock
-// 内部s3
-func SerializeRawBlock(chainID string, rawBlock *gtype.Block) (*DataFile, error) {
-	data := bytes.Buffer{}
-	rawBlock.EncodeRLP(&data)
-	s3Key := fmt.Sprintf("%s/%s/rawBlock", chainID, rawBlock.Hash().Hex())
-	return &DataFile{
-		S3key: s3Key,
-		Data:  data.Bytes(),
-		Kind:  "raw_block",
 	}, nil
 }
