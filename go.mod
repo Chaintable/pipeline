@@ -5,7 +5,7 @@ go 1.22.5
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.28.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.66.3
-	github.com/ethereum/go-ethereum v1.14.11
+	github.com/ethereum/go-ethereum v1.14.8
 	github.com/holiman/uint256 v1.3.1
 	github.com/klauspost/compress v1.17.11
 	github.com/segmentio/kafka-go v0.4.47
