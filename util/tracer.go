@@ -1,7 +1,6 @@
 package util
 
 import (
-	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -28,23 +27,6 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		block.BaseFeePerGas = rawBlock.Header().BaseFee
 	}
 	return block
-}
-
-func BuildPipelineWithdrawals(rawBlock *types.Block) []ptypes.SpecialTransfer {
-	res := make([]ptypes.SpecialTransfer, 0)
-	for _, withdrawal := range rawBlock.Withdrawals() {
-		specialTransfer := ptypes.SpecialTransfer{
-			FromAddress: strings.ToLower("0x00000000219ab540356cBB839Cbe05303d7705Fa"), //eth2 合约
-			ToAddress:   strings.ToLower(withdrawal.Address.Hex()),
-			Value:       (*hexutil.Big)(big.NewInt(int64(withdrawal.Amount))),
-			Memo:        "beacon_withdrawl",
-			Idx:         big.NewInt(int64(withdrawal.Index)),
-		}
-		specialTransfer.ID = ToHash([]string{rawBlock.Hash().Hex(), specialTransfer.ToAddress, fmt.Sprintf("%d", withdrawal.Index)})
-		res = append(res, specialTransfer)
-	}
-
-	return res
 }
 
 func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {

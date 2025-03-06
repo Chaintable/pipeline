@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -76,11 +74,10 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.BlockDiff = &ptypes.BlockStorageDiff{}
 	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(event.Block)
 	BlockCtx.BlockFile = &ptypes.BlockFile{
-		Block:            util.BuildPipelineBlock(event.Block),
-		SpecialTransfers: util.BuildPipelineWithdrawals(event.Block),
-		Events:           make([]ptypes.Event, 0),
-		Txs:              make([]ptypes.Transaction, 0),
-		Traces:           make([]ptypes.Trace, 0),
+		Block:  util.BuildPipelineBlock(event.Block),
+		Events: make([]ptypes.Event, 0),
+		Txs:    make([]ptypes.Transaction, 0),
+		Traces: make([]ptypes.Trace, 0),
 	}
 	BlockCtx.Tx = nil
 	BlockCtx.From = common.Address{}
@@ -155,47 +152,6 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	t.callTracer.OnLog(log)
 }
 
-func (t *PipelineTracer) OnBalanceChange(a common.Address, prevBalance, newBalance *big.Int, reason tracing.BalanceChangeReason) {
-	diff := new(big.Int).Sub(newBalance, prevBalance)
-
-	if reason == tracing.BalanceIncreaseRewardMineUncle || reason == tracing.BalanceIncreaseRewardMineBlock {
-		for i := range BlockCtx.BlockFile.SpecialTransfers {
-			sp := &BlockCtx.BlockFile.SpecialTransfers[i]
-			if sp.ToAddress == strings.ToLower(a.Hex()) && sp.Memo == "block_reward" {
-				sp.Value = (*hexutil.Big)(new(big.Int).Add(sp.Value.ToInt(), diff))
-				return
-			}
-		}
-		specialTransfer := ptypes.SpecialTransfer{
-			FromAddress: common.Address{}.Hex(),
-			ToAddress:   strings.ToLower(a.Hex()),
-			Value:       (*hexutil.Big)(diff),
-			Memo:        "block_reward",
-			Idx:         big.NewInt(int64(reason)),
-		}
-		specialTransfer.ID = util.ToHash([]string{BlockCtx.BlockHash.Hex(), specialTransfer.ToAddress, fmt.Sprintf("%d", tracing.BalanceIncreaseRewardMineBlock)})
-		BlockCtx.BlockFile.SpecialTransfers = append(BlockCtx.BlockFile.SpecialTransfers, specialTransfer)
-	}
-	if reason == tracing.BalanceIncreaseRewardTransactionFee {
-		for i := range BlockCtx.BlockFile.SpecialTransfers {
-			sp := &BlockCtx.BlockFile.SpecialTransfers[i]
-			if sp.ToAddress == strings.ToLower(a.Hex()) && sp.Memo == "gasfee_reward" {
-				sp.Value = (*hexutil.Big)(new(big.Int).Add(sp.Value.ToInt(), diff))
-				return
-			}
-		}
-		specialTransfer := ptypes.SpecialTransfer{
-			FromAddress: common.Address{}.Hex(),
-			ToAddress:   strings.ToLower(a.Hex()),
-			Value:       (*hexutil.Big)(diff),
-			Memo:        "gasfee_reward",
-			Idx:         big.NewInt(int64(reason)),
-		}
-		specialTransfer.ID = util.ToHash([]string{BlockCtx.BlockHash.Hex(), specialTransfer.ToAddress, fmt.Sprintf("%d", tracing.BalanceIncreaseRewardTransactionFee)})
-		BlockCtx.BlockFile.SpecialTransfers = append(BlockCtx.BlockFile.SpecialTransfers, specialTransfer)
-	}
-}
-
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
@@ -222,19 +178,6 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	// 业务s3
 	blockFile := &ptypes.BlockFile{
 		Block: util.BuildPipelineBlock(block),
-	}
-	for addr, acc := range alloc {
-		if acc.Balance.Cmp(big.NewInt(0)) > 0 {
-			specialTransfer := ptypes.SpecialTransfer{
-				FromAddress: common.Address{}.Hex(),
-				ToAddress:   strings.ToLower(addr.Hex()),
-				Value:       (*hexutil.Big)(acc.Balance),
-				Memo:        "genesis",
-				Idx:         big.NewInt(0),
-			}
-			specialTransfer.ID = util.ToHash([]string{block.Hash().Hex(), specialTransfer.ToAddress, fmt.Sprintf("%d", specialTransfer.Idx)})
-			blockFile.SpecialTransfers = append(blockFile.SpecialTransfers, specialTransfer)
-		}
 	}
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
