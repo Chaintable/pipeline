@@ -69,40 +69,12 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	return &blockHeader
 }
 
-func EffectiveGasPrice(tx *types.Transaction, dst *big.Int, baseFee *big.Int) *big.Int {
-	switch tx.Type() {
-	case types.DynamicFeeTxType:
-		if baseFee == nil {
-			return dst.Set(tx.GasFeeCap())
-		}
-		tip := dst.Sub(tx.GasFeeCap(), baseFee)
-		if tip.Cmp(tx.GasTipCap()) > 0 {
-			tip.Set(tx.GasTipCap())
-		}
-		return tip.Add(tip, baseFee)
-	case types.BlobTxType:
-		if baseFee == nil {
-			return dst.Set(tx.GasFeeCap())
-		}
-		tip := dst.Sub(tx.GasFeeCap(), baseFee)
-		if tip.Cmp(tx.GasTipCap()) > 0 {
-			tip.Set(tx.GasTipCap())
-		}
-		return tip.Add(tip, baseFee)
-	case types.AccessListTxType:
-		return dst.Set(tx.GasPrice())
-	case types.LegacyTxType:
-		return dst.Set(tx.GasPrice())
-	}
-	return nil
-}
-
 func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, from common.Address, baseFee *big.Int) ptypes.Transaction {
 	to := receipt.ContractAddress
 	if tx.To() != nil {
 		to = *tx.To()
 	}
-	gasPrice := EffectiveGasPrice(tx, new(big.Int), baseFee)
+	gasPrice := receipt.EffectiveGasPrice
 	if gasPrice == nil {
 		gasPrice = tx.GasPrice()
 	}
