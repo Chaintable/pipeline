@@ -43,7 +43,7 @@ func SerializeFileValidation(chainID string, blockFile *types.BlockFile) (*DataF
 	}, nil
 }
 
-// s3Key: <chainID>/<blockHash>/header
+// s3Key: <chainID>/<blockHash>/block
 // 内部s3
 func SerializeHeader(chainID string, header *types.Header) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(header)
@@ -58,7 +58,7 @@ func SerializeHeader(chainID string, header *types.Header) (*DataFile, error) {
 	}, nil
 }
 
-// s3Key: <chainID>/<blockHash>/stateDiff
+// s3Key: <chainID>/<blockRoot>/stateDiff
 // 内部s3
 func SerializeStateDiff(chainID string, stateDiff *types.BlockStorageDiff) (*DataFile, error) {
 	data, err := util.EncodeToRlp(stateDiff)
