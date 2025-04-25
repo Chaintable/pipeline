@@ -3,10 +3,13 @@ package util
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 func NewS3Client(region string) (*s3.Client, error) {
@@ -19,12 +22,23 @@ func NewS3Client(region string) (*s3.Client, error) {
 	return client, nil
 }
 
-func UploadFileToS3(uploader *s3.Client, bucket string, key string, data []byte) error {
-	_, err := uploader.PutObject(context.TODO(), &s3.PutObjectInput{
+func UploadFileToS3(uploader *s3.Client, bucket string, key string, data []byte, overWrite bool) error {
+	input := &s3.PutObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
 		Body:   bytes.NewReader(data),
-	})
+	}
+	if !overWrite {
+		input.IfNoneMatch = aws.String("*")
+	}
+
+	_, err := uploader.PutObject(context.TODO(), input)
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "PreconditionFailed" {
+			return nil
+		}
+	}
 	return err
 }
 

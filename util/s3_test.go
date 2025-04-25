@@ -38,3 +38,14 @@ func TestS3(t *testing.T) {
 	t.Logf("EncodeToJsonGzip() took %v", time.Since(encodeStartTime))
 	// t.Logf("Tested DownloadFileFromS3() successfully, %+v", file)
 }
+
+func TestS32(t *testing.T) {
+	s3client, err := NewS3Client("ap-northeast-1")
+	if err != nil {
+		t.Errorf("Expected s3 client, got nil")
+	}
+	err = UploadFileToS3(s3client, "chaintable-pipeline-test", "100/0xaeaa51f5cf80c31e3c21a80e5b2399e31675fe253c676d351db66aa35d341374", []byte("test"), false)
+	if err != nil {
+		t.Fatalf("get err %v", err)
+	}
+}

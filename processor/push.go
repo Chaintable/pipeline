@@ -27,9 +27,10 @@ type PushProcessor struct {
 	S3TempDir       string
 	quitCh          chan struct{}
 	S3DataCh        chan *DataFile
+	IsBackup        bool
 }
 
-func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string) (*PushProcessor, error) {
+func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string, isBackup bool) (*PushProcessor, error) {
 	kafkaReader := util.NewKafkaReader(brokers, topic, "")
 	kafkaWriter := util.NewKafkaWriter(brokers, topic)
 	s3Uploader, err := util.NewS3Client(region)
@@ -57,6 +58,7 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		S3TempDir:       s3TempDir,
 		quitCh:          make(chan struct{}),
 		S3DataCh:        make(chan *DataFile, 100),
+		IsBackup:        isBackup,
 	}
 
 	if s3TempDir != "" {
@@ -174,7 +176,7 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 	}()
 	times := 0
 	for {
-		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
+		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, !p.IsBackup)
 		if err != nil {
 			if times > 3 {
 				return err
@@ -197,7 +199,7 @@ func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 		go func(file *DataFile) {
 			times := 0
 			for {
-				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data)
+				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, !p.IsBackup)
 				if err != nil {
 					if times > 3 {
 						lock.Lock()
@@ -231,6 +233,10 @@ func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
 }
 
 func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification) error {
+	if p.IsBackup {
+		// 如果是备份模式，直接返回
+		return nil
+	}
 	if len(blockNotice.NewBlocks) > 1 {
 		// 1. 首先检查 newBlocks 是否满足我们想要的严格顺序和父子关系
 		valid := true
