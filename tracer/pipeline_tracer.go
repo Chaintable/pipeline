@@ -24,8 +24,9 @@ import (
 // 3. block file
 
 type PipelineTracer struct {
-	config     pipelineTracerConfig
-	callTracer *callTracer
+	config         pipelineTracerConfig
+	callTracer     *callTracer
+	prestateTracer *prestateTracer
 }
 
 type pipelineTracerConfig struct {
@@ -36,6 +37,7 @@ type pipelineTracerConfig struct {
 	Topic            string   `json:"topic"`
 	S3TempDir        string   `json:"s3_temp_dir"`
 	IsBackup         bool     `json:"is_backup"`
+	EnableStateDiff  bool     `json:"enable_state_diff"`
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -84,6 +86,12 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.From = common.Address{}
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
+
+	if t.config.EnableStateDiff {
+		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
+			DiffMode: true,
+		})
+	}
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
@@ -103,12 +111,17 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 		}
 	}
 	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
+
+	// TODO on commit
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	callTracer := newCallTracerRaw()
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
+
+	t.prestateTracer.OnTxStart(vm, tx, from)
+
 	BlockCtx.Tx = tx
 	BlockCtx.From = from
 	BlockCtx.TxStartTime = time.Now()
@@ -120,6 +133,8 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}()
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
+
+	t.prestateTracer.OnTxEnd(receipt, err)
 
 	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
@@ -144,6 +159,7 @@ func (t *PipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tr
 		return
 	}
 	t.callTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
+	t.prestateTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
 }
 
 func (t *PipelineTracer) OnLog(log *types.Log) {
