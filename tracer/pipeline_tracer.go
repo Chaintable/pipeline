@@ -154,9 +154,9 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 }
 
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
-	if NodeXPusher.LastBlockNotice != nil {
-		return
-	}
+	// if NodeXPusher.LastBlockNotice != nil {
+	// 	return
+	// }
 
 	// 内部s3
 	header := util.BuildPilelineBlockHeader(block)
