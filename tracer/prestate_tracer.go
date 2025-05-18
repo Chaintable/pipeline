@@ -11,6 +11,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/holiman/uint256"
 	"math/big"
 	"sync/atomic"
 )
@@ -290,4 +292,29 @@ func MemoryPtr(m []byte, offset, size int64) []byte {
 	}
 
 	return nil
+}
+
+func AddressToHash(a common.Address) common.Hash {
+	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
+}
+
+func SlimAccountRLP(a account) []byte {
+	return types.SlimAccountRLP(types.StateAccount{
+		Nonce:    a.Nonce,
+		Balance:  uint256.MustFromBig(a.Balance),
+		CodeHash: a.Code,
+		Root:     types.EmptyRootHash,
+		// TODO root is not empty, need to fix it
+	})
+}
+
+func EncodeStorageVal(val common.Hash) []byte {
+	encode := func(val common.Hash) []byte {
+		if val == (common.Hash{}) {
+			return nil
+		}
+		blob, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(val[:]))
+		return blob
+	}
+	return encode(val)
 }

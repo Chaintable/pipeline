@@ -3,6 +3,8 @@ package tracer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/holiman/uint256"
 	"math/big"
 	"sync"
 	"time"
@@ -231,9 +233,77 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 }
 
+func (t *PipelineTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
+	if !t.config.EnableStateDiff {
+		return nil
+	}
+
+	stateDiff := &ptypes.BlockStorageDiff{}
+	if originRoot == (common.Hash{}) {
+		originRoot = types.EmptyRootHash
+	}
+	if root == (common.Hash{}) {
+		root = types.EmptyRootHash
+	}
+	stateDiff.Hash = root
+	stateDiff.ParentHash = originRoot
+
+	for addr := range t.prestateTracer.created {
+		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
+			Address:  AddressToHash(addr),
+			Balance:  uint256.MustFromBig(t.prestateTracer.post[addr].Balance),
+			Nonce:    t.prestateTracer.post[addr].Nonce,
+			CodeHash: common.BytesToHash(t.prestateTracer.post[addr].Code),
+		})
+	}
+
+	for addr := range t.prestateTracer.deleted {
+		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, AddressToHash(addr))
+	}
+
+	for addr, acct := range t.prestateTracer.post {
+		Values := make([]ptypes.IndexValuePair, 0, len(acct.Storage))
+		for k, v := range acct.Storage {
+			value := uint256.NewInt(0)
+			if v != types.EmptyRootHash {
+				_, content, _, err := rlp.Split(EncodeStorageVal(v))
+				if err != nil {
+					log.Error("Failed to split storage", "err", err)
+				}
+				value = uint256.NewInt(0).SetBytes(content)
+			}
+			Values = append(Values, ptypes.IndexValuePair{
+				Index: k,
+				Value: value,
+			})
+		}
+		if len(Values) > 0 {
+			stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
+				Address: AddressToHash(addr),
+				Values:  Values,
+			})
+		}
+	}
+
+	for addr, code := range t.prestateTracer.post {
+		if len(code.Code) > 0 {
+			stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
+				CodeHash: AddressToHash(addr),
+				Code:     code.Code,
+			})
+		}
+	}
+	return stateDiff
+}
+
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
-		stateDiff := stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+		var stateDiff *ptypes.BlockStorageDiff
+		if t.config.EnableStateDiff {
+			stateDiff = t.GetStateDiff(originRoot, root)
+		} else {
+			stateDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+		}
 		BlockCtx.BlockDiff = stateDiff
 	} else {
 		BlockCtx.BlockDiff = nil
