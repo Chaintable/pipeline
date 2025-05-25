@@ -3,6 +3,7 @@ package tracer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
 	"math/big"
@@ -273,7 +274,7 @@ func (t *PipelineTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 				value = uint256.NewInt(0).SetBytes(content)
 			}
 			Values = append(Values, ptypes.IndexValuePair{
-				Index: k,
+				Index: crypto.Keccak256Hash(k[:]),
 				Value: value,
 			})
 		}
