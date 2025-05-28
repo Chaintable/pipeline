@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
 	"math/big"
 	"sync"
@@ -235,10 +234,6 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 }
 
 func (t *PipelineTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
-	if !t.config.EnableStateDiff {
-		return nil
-	}
-
 	stateDiff := &ptypes.BlockStorageDiff{}
 	if originRoot == (common.Hash{}) {
 		originRoot = types.EmptyRootHash
@@ -249,30 +244,42 @@ func (t *PipelineTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 	stateDiff.Hash = root
 	stateDiff.ParentHash = originRoot
 
-	for addr := range t.prestateTracer.created {
-		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
-			Address:  AddressToHash(addr),
-			Balance:  uint256.MustFromBig(t.prestateTracer.post[addr].Balance),
-			Nonce:    t.prestateTracer.post[addr].Nonce,
-			CodeHash: common.BytesToHash(t.prestateTracer.post[addr].Code),
-		})
+	for addr, account := range t.prestateTracer.post {
+		// only storage changes
+		if account.Nonce == 0 && len(account.Code) == 0 && account.Balance == nil {
+			continue
+		}
+		if account.Balance != nil || account.Nonce != 0 || len(account.Code) > 0 {
+			newBalance := t.prestateTracer.pre[addr].Balance
+			if account.Balance != nil {
+				newBalance = account.Balance
+			}
+			newNonce := t.prestateTracer.pre[addr].Nonce
+			if account.Nonce != 0 {
+				newNonce = account.Nonce
+			}
+			newCodeHash := crypto.Keccak256Hash(t.prestateTracer.pre[addr].Code)
+			if len(account.Code) > 0 {
+				newCodeHash = crypto.Keccak256Hash(account.Code)
+			}
+
+			stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
+				Address:  addressToHash(addr),
+				Balance:  uint256.MustFromBig(newBalance),
+				Nonce:    newNonce,
+				CodeHash: newCodeHash,
+			})
+		}
 	}
 
 	for addr := range t.prestateTracer.deleted {
-		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, AddressToHash(addr))
+		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addressToHash(addr))
 	}
 
 	for addr, acct := range t.prestateTracer.post {
 		Values := make([]ptypes.IndexValuePair, 0, len(acct.Storage))
 		for k, v := range acct.Storage {
-			value := uint256.NewInt(0)
-			if v != types.EmptyRootHash {
-				_, content, _, err := rlp.Split(EncodeStorageVal(v))
-				if err != nil {
-					log.Error("Failed to split storage", "err", err)
-				}
-				value = uint256.NewInt(0).SetBytes(content)
-			}
+			value := uint256.NewInt(0).SetBytes(v.Bytes())
 			Values = append(Values, ptypes.IndexValuePair{
 				Index: crypto.Keccak256Hash(k[:]),
 				Value: value,
@@ -280,23 +287,22 @@ func (t *PipelineTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		}
 		if len(Values) > 0 {
 			stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
-				Address: AddressToHash(addr),
+				Address: addressToHash(addr),
 				Values:  Values,
 			})
 		}
 	}
 
-	for addr, code := range t.prestateTracer.post {
+	for _, code := range t.prestateTracer.post {
 		if len(code.Code) > 0 {
 			stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
-				CodeHash: AddressToHash(addr),
+				CodeHash: crypto.Keccak256Hash(code.Code),
 				Code:     code.Code,
 			})
 		}
 	}
 	return stateDiff
 }
-
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
 		var stateDiff *ptypes.BlockStorageDiff
@@ -386,4 +392,8 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
+}
+
+func addressToHash(a common.Address) common.Hash {
+	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
