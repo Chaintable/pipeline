@@ -2,7 +2,6 @@ package tracer
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -149,25 +148,6 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 			delete(t.pre, a)
 		}
 	}
-}
-
-// GetResult returns the json-encoded nested list of call traces, and any
-// error arising from the encoding or forceful termination (via `Stop`).
-func (t *prestateTracer) GetResult() (json.RawMessage, error) {
-	var res []byte
-	var err error
-	if t.config.DiffMode {
-		res, err = json.Marshal(struct {
-			Post stateMap `json:"post"`
-			Pre  stateMap `json:"pre"`
-		}{t.post, t.pre})
-	} else {
-		res, err = json.Marshal(t.pre)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(res), t.reason
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
