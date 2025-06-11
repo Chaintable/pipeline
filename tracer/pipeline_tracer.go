@@ -352,9 +352,3 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 func addressToHash(a common.Address) common.Hash {
 	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
-
-func (t *PipelineTracer) OnBalance(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnBalance(addr, prev, new, reason)
-	}
-}
