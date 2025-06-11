@@ -2,19 +2,20 @@ package tracer
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+	"sync/atomic"
+
+	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
-	"math/big"
-	"sync/atomic"
 )
 
 type stateMap = map[common.Address]*account
@@ -105,6 +106,11 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 	}
 }
 
+func (t *prestateTracer) OnSystemCallStartHookV2(vm *tracing.VMContext) {
+	t.env = vm
+	t.lookupAccount(params.BeaconRootsAddress)
+}
+
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	t.env = env
 	if tx.To() == nil {
@@ -142,25 +148,6 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 			delete(t.pre, a)
 		}
 	}
-}
-
-// GetResult returns the json-encoded nested list of call traces, and any
-// error arising from the encoding or forceful termination (via `Stop`).
-func (t *prestateTracer) GetResult() (json.RawMessage, error) {
-	var res []byte
-	var err error
-	if t.config.DiffMode {
-		res, err = json.Marshal(struct {
-			Post stateMap `json:"post"`
-			Pre  stateMap `json:"pre"`
-		}{t.post, t.pre})
-	} else {
-		res, err = json.Marshal(t.pre)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(res), t.reason
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
@@ -250,6 +237,87 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 	t.pre[addr].Storage[key] = t.env.StateDB.GetState(addr, key)
 }
 
+func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
+	stateDiff := &ptypes.BlockStorageDiff{}
+	if originRoot == (common.Hash{}) {
+		originRoot = types.EmptyRootHash
+	}
+	if root == (common.Hash{}) {
+		root = types.EmptyRootHash
+	}
+	stateDiff.Hash = root
+	stateDiff.ParentHash = originRoot
+
+	for addr, newAccount := range t.post {
+		oldAccount, exists := t.pre[addr]
+		if !exists {
+			// If the account does not exist in prestate, it is a new create account
+			oldAccount = &account{
+				Balance: big.NewInt(0),
+				Nonce:   0,
+				empty:   true,
+			}
+		}
+
+		// only storage changes
+		if newAccount.Nonce == 0 && len(newAccount.Code) == 0 && newAccount.Balance == nil {
+			continue
+		}
+		if newAccount.Balance != nil || newAccount.Nonce != 0 || len(newAccount.Code) > 0 {
+			newBalance := oldAccount.Balance
+			if newAccount.Balance != nil {
+				newBalance = newAccount.Balance
+			}
+			newNonce := oldAccount.Nonce
+			if newAccount.Nonce != 0 {
+				newNonce = newAccount.Nonce
+			}
+			newCodeHash := crypto.Keccak256Hash(oldAccount.Code)
+			if len(newAccount.Code) > 0 {
+				newCodeHash = crypto.Keccak256Hash(newAccount.Code)
+			}
+
+			stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
+				Address:  addressToHash(addr),
+				Balance:  uint256.MustFromBig(newBalance),
+				Nonce:    newNonce,
+				CodeHash: newCodeHash,
+			})
+		}
+	}
+
+	for addr := range t.deleted {
+		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addressToHash(addr))
+	}
+
+	for addr, acct := range t.post {
+		Values := make([]ptypes.IndexValuePair, 0, len(acct.Storage))
+		for k, v := range acct.Storage {
+			value := uint256.NewInt(0).SetBytes(v.Bytes())
+			Values = append(Values, ptypes.IndexValuePair{
+				Index: crypto.Keccak256Hash(k[:]),
+				Value: value,
+			})
+		}
+		if len(Values) > 0 {
+			stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
+				Address: addressToHash(addr),
+				Values:  Values,
+			})
+		}
+	}
+
+	for _, code := range t.post {
+		if len(code.Code) > 0 {
+			stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
+				CodeHash: crypto.Keccak256Hash(code.Code),
+				Code:     code.Code,
+			})
+		}
+	}
+	return stateDiff
+}
+
 const (
 	memoryPadLimit = 1024 * 1024
 )
@@ -301,29 +369,4 @@ func MemoryPtr(m []byte, offset, size int64) []byte {
 	}
 
 	return nil
-}
-
-func AddressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
-}
-
-func SlimAccountRLP(a account) []byte {
-	return types.SlimAccountRLP(types.StateAccount{
-		Nonce:    a.Nonce,
-		Balance:  uint256.MustFromBig(a.Balance),
-		CodeHash: a.Code,
-		Root:     types.EmptyRootHash,
-		// TODO root is not empty, need to fix it
-	})
-}
-
-func EncodeStorageVal(val common.Hash) []byte {
-	encode := func(val common.Hash) []byte {
-		if val == (common.Hash{}) {
-			return nil
-		}
-		blob, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(val[:]))
-		return blob
-	}
-	return encode(val)
 }
