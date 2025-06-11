@@ -33,15 +33,16 @@ func (a *account) exists() bool {
 }
 
 type prestateTracer struct {
-	env       *tracing.VMContext
-	pre       stateMap
-	post      stateMap
-	to        common.Address
-	config    prestateTracerConfig
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
-	created   map[common.Address]bool
-	deleted   map[common.Address]bool
+	env            *tracing.VMContext
+	pre            stateMap
+	post           stateMap
+	to             common.Address
+	config         prestateTracerConfig
+	interrupt      atomic.Bool // Atomic flag to signal execution interruption
+	reason         error       // Textual reason for the interruption
+	created        map[common.Address]bool
+	deleted        map[common.Address]bool
+	balanceChanged map[common.Address]interface{} // Map to track balance changes
 }
 
 type prestateTracerConfig struct {
@@ -50,11 +51,12 @@ type prestateTracerConfig struct {
 
 func newPrestateTracer(config *prestateTracerConfig) *prestateTracer {
 	t := &prestateTracer{
-		pre:     stateMap{},
-		post:    stateMap{},
-		config:  *config,
-		created: make(map[common.Address]bool),
-		deleted: make(map[common.Address]bool),
+		pre:            stateMap{},
+		post:           stateMap{},
+		config:         *config,
+		created:        make(map[common.Address]bool),
+		deleted:        make(map[common.Address]bool),
+		balanceChanged: make(map[common.Address]interface{}),
 	}
 	return t
 }
@@ -286,6 +288,17 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		}
 	}
 
+	for addr := range t.balanceChanged {
+		if t.post[addr] == nil && !t.deleted[addr] {
+			stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
+				Address:  addressToHash(addr),
+				Balance:  uint256.MustFromBig(t.env.StateDB.GetBalance(addr).ToBig()),
+				Nonce:    t.env.StateDB.GetNonce(addr),
+				CodeHash: crypto.Keccak256Hash(t.env.StateDB.GetCode(addr)),
+			})
+		}
+	}
+
 	for addr := range t.deleted {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addressToHash(addr))
 	}
@@ -316,6 +329,10 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		}
 	}
 	return stateDiff
+}
+
+func (t *prestateTracer) OnBalance(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
+	t.balanceChanged[addr] = struct{}{}
 }
 
 const (
