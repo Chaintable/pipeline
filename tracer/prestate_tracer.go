@@ -33,16 +33,15 @@ func (a *account) exists() bool {
 }
 
 type prestateTracer struct {
-	env            *tracing.VMContext
-	pre            stateMap
-	post           stateMap
-	to             common.Address
-	config         prestateTracerConfig
-	interrupt      atomic.Bool // Atomic flag to signal execution interruption
-	reason         error       // Textual reason for the interruption
-	created        map[common.Address]bool
-	deleted        map[common.Address]bool
-	balanceChanged map[common.Address]interface{} // Map to track balance changes
+	env       *tracing.VMContext
+	pre       stateMap
+	post      stateMap
+	to        common.Address
+	config    prestateTracerConfig
+	interrupt atomic.Bool // Atomic flag to signal execution interruption
+	reason    error       // Textual reason for the interruption
+	created   map[common.Address]bool
+	deleted   map[common.Address]bool
 }
 
 type prestateTracerConfig struct {
@@ -51,12 +50,11 @@ type prestateTracerConfig struct {
 
 func newPrestateTracer(config *prestateTracerConfig) *prestateTracer {
 	t := &prestateTracer{
-		pre:            stateMap{},
-		post:           stateMap{},
-		config:         *config,
-		created:        make(map[common.Address]bool),
-		deleted:        make(map[common.Address]bool),
-		balanceChanged: make(map[common.Address]interface{}),
+		pre:     stateMap{},
+		post:    stateMap{},
+		config:  *config,
+		created: make(map[common.Address]bool),
+		deleted: make(map[common.Address]bool),
 	}
 	return t
 }
@@ -239,6 +237,12 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 	t.pre[addr].Storage[key] = t.env.StateDB.GetState(addr, key)
 }
 
+func (t *prestateTracer) OnBlockDBStart(db tracing.StateDB) {
+	t.env = &tracing.VMContext{
+		StateDB: db,
+	}
+}
+
 func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
 	t.processDiffState()
 	stateDiff := &ptypes.BlockStorageDiff{}
@@ -289,17 +293,6 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		}
 	}
 
-	for addr := range t.balanceChanged {
-		if t.post[addr] == nil && !t.deleted[addr] {
-			stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
-				Address:  addressToHash(addr),
-				Balance:  t.env.StateDB.GetBalance(addr),
-				Nonce:    t.env.StateDB.GetNonce(addr),
-				CodeHash: crypto.Keccak256Hash(t.env.StateDB.GetCode(addr)),
-			})
-		}
-	}
-
 	for addr := range t.deleted {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addressToHash(addr))
 	}
@@ -332,8 +325,21 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 	return stateDiff
 }
 
-func (t *prestateTracer) OnBalance(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
-	t.balanceChanged[addr] = struct{}{}
+func (t *prestateTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
+	if _, ok := t.pre[addr]; ok {
+		return
+	}
+
+	acc := &account{
+		Balance: prev,
+		Nonce:   t.env.StateDB.GetNonce(addr),
+		Code:    t.env.StateDB.GetCode(addr),
+		Storage: make(map[common.Hash]common.Hash),
+	}
+	if !acc.exists() {
+		acc.empty = true
+	}
+	t.pre[addr] = acc
 }
 
 const (
