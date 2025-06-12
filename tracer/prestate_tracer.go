@@ -237,7 +237,14 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 	t.pre[addr].Storage[key] = t.env.StateDB.GetState(addr, key)
 }
 
+func (t *prestateTracer) OnBlockDBStart(db tracing.StateDB) {
+	t.env = &tracing.VMContext{
+		StateDB: db,
+	}
+}
+
 func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
+	t.processDiffState()
 	stateDiff := &ptypes.BlockStorageDiff{}
 	if originRoot == (common.Hash{}) {
 		originRoot = types.EmptyRootHash
@@ -316,6 +323,23 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		}
 	}
 	return stateDiff
+}
+
+func (t *prestateTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
+	if _, ok := t.pre[addr]; ok {
+		return
+	}
+
+	acc := &account{
+		Balance: prev,
+		Nonce:   t.env.StateDB.GetNonce(addr),
+		Code:    t.env.StateDB.GetCode(addr),
+		Storage: make(map[common.Hash]common.Hash),
+	}
+	if !acc.exists() {
+		acc.empty = true
+	}
+	t.pre[addr] = acc
 }
 
 const (
