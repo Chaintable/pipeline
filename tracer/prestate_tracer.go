@@ -238,6 +238,7 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 }
 
 func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
+	t.processDiffState()
 	stateDiff := &ptypes.BlockStorageDiff{}
 	if originRoot == (common.Hash{}) {
 		originRoot = types.EmptyRootHash
