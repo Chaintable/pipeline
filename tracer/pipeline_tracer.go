@@ -254,6 +254,12 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 }
 
+func (t *PipelineTracer) OnBlockDBStart(db tracing.StateDB) {
+	if t.prestateTracer != nil {
+		t.prestateTracer.OnBlockDBStart(db)
+	}
+}
+
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
 		var stateDiff *ptypes.BlockStorageDiff
@@ -352,3 +358,12 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 func addressToHash(a common.Address) common.Hash {
 	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
+<<<<<<< HEAD
+=======
+
+func (t *PipelineTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
+	if t.prestateTracer != nil {
+		t.prestateTracer.OnBalanceChange(addr, prev, new, reason)
+	}
+}
+>>>>>>> 45130c8 (fix)
