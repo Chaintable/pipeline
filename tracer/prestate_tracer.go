@@ -240,6 +240,7 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 }
 
 func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) *ptypes.BlockStorageDiff {
+	t.processDiffState()
 	stateDiff := &ptypes.BlockStorageDiff{}
 	if originRoot == (common.Hash{}) {
 		originRoot = types.EmptyRootHash
@@ -292,7 +293,7 @@ func (t *prestateTracer) GetStateDiff(originRoot common.Hash, root common.Hash) 
 		if t.post[addr] == nil && !t.deleted[addr] {
 			stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 				Address:  addressToHash(addr),
-				Balance:  uint256.MustFromBig(t.env.StateDB.GetBalance(addr).ToBig()),
+				Balance:  t.env.StateDB.GetBalance(addr),
 				Nonce:    t.env.StateDB.GetNonce(addr),
 				CodeHash: crypto.Keccak256Hash(t.env.StateDB.GetCode(addr)),
 			})
