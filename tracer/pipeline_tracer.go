@@ -33,14 +33,14 @@ type PipelineTracer struct {
 }
 
 type pipelineTracerConfig struct {
-	Region           string   `json:"region"`
-	NodeXBucket      string   `json:"node_x_bucket"`
-	ChainTableBucket string   `json:"chain_table_bucket"`
-	Brokers          []string `json:"brokers"`
-	Topic            string   `json:"topic"`
-	S3TempDir        string   `json:"s3_temp_dir"`
-	IsBackup         bool     `json:"is_backup"`
-	EnableStateDiff  bool     `json:"enable_state_diff"`
+	Region               string   `json:"region"`
+	NodeXBucket          string   `json:"node_x_bucket"`
+	ChainTableBucket     string   `json:"chain_table_bucket"`
+	Brokers              []string `json:"brokers"`
+	Topic                string   `json:"topic"`
+	S3TempDir            string   `json:"s3_temp_dir"`
+	IsBackup             bool     `json:"is_backup"`
+	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -93,7 +93,7 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
 	BlockCtx.ChangeContracts = make(map[common.Address]struct{})
-	if t.config.EnableStateDiff {
+	if t.config.EnablePreStateTracer {
 		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
 			DiffMode: true,
 		})
@@ -263,7 +263,7 @@ func (t *PipelineTracer) OnBlockDBStart(db tracing.StateDB) {
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
 		var stateDiff *ptypes.BlockStorageDiff
-		if t.config.EnableStateDiff {
+		if t.config.EnablePreStateTracer {
 			stateDiff = t.prestateTracer.GetStateDiff(originRoot, root)
 		} else {
 			stateDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
@@ -358,12 +358,9 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 func addressToHash(a common.Address) common.Hash {
 	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
-<<<<<<< HEAD
-=======
 
 func (t *PipelineTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
 	if t.prestateTracer != nil {
 		t.prestateTracer.OnBalanceChange(addr, prev, new, reason)
 	}
 }
->>>>>>> 45130c8 (fix)
