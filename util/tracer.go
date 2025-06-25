@@ -94,10 +94,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
 	switch tx.Type() {
-	case types.DynamicFeeTxType:
-		transaction.GasFeeCap = tx.GasFeeCap()
-		transaction.GasTipCap = tx.GasTipCap()
-	case types.BlobTxType:
+	case types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
 		transaction.GasFeeCap = tx.GasFeeCap()
 		transaction.GasTipCap = tx.GasTipCap()
 	}
