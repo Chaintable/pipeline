@@ -1,8 +1,6 @@
 package tracer
 
 import (
-	"encoding/json"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -29,11 +27,11 @@ import (
 var _ vm.EVMLogger = (*PipelineTracer)(nil)
 
 type PipelineTracer struct {
-	config     pipelineTracerConfig
+	config     PipelineTracerConfig
 	callTracer *callTracer
 }
 
-type pipelineTracerConfig struct {
+type PipelineTracerConfig struct {
 	Region           string   `json:"region"`
 	NodeXBucket      string   `json:"node_x_bucket"`
 	ChainTableBucket string   `json:"chain_table_bucket"`
@@ -43,13 +41,7 @@ type pipelineTracerConfig struct {
 	IsBackup         bool     `json:"is_backup"`
 }
 
-func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
-	var config pipelineTracerConfig
-	if cfg != nil {
-		if err := json.Unmarshal(cfg, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse config: %v", err)
-		}
-	}
+func NewPipelineTracer(config PipelineTracerConfig) (*PipelineTracer, error) {
 	t := &PipelineTracer{
 		config: config,
 	}
