@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/Chaintable/pipeline/types"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ava-labs/libevm/common"
 )
 
 func TestKafkaReader(t *testing.T) {
