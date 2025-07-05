@@ -216,8 +216,10 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		ErrorTraces:      make([]ptypes.Trace, 0),
 		StorageContracts: make([]string, 0),
 	}
-	for _, diff := range blockDiff.StorageDiff {
-		blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(diff.Address.Hex()))
+	for addr, account := range alloc {
+		if len(account.Storage) > 0 {
+			blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(addr.Hex()))
+		}
 	}
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
