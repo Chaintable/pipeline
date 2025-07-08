@@ -238,6 +238,10 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
+	size := len(t.callstack)
+	if size <= 1 {
+		return
+	}
 	setParentFailed(&t.callstack[0], false)
 	setStorageChange(&t.callstack[0], t.ChangeContracts)
 	if len(t.callstack) == 1 {
