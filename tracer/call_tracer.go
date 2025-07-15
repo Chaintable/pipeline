@@ -96,6 +96,9 @@ type callTracer struct {
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
+	ChangeContracts map[common.Address]struct{}
+	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
+
 	txID string
 }
 
@@ -104,11 +107,14 @@ type callTracerConfig struct {
 	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
 }
 
-func newCallTracerRaw() *callTracer {
+func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
 	t := &callTracer{callstack: make([]callFrame, 0, 1), config: callTracerConfig{
 		OnlyTopCall: false,
 		WithLog:     true,
-	}}
+	},
+		ChangeContracts: ChangeContracts,
+		BlockFile:       BlockFile,
+	}
 	return t
 }
 
@@ -249,14 +255,14 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
-	setStorageChange(&t.callstack[0])
+	setStorageChange(&t.callstack[0], t.ChangeContracts)
 	if len(t.callstack) == 1 {
 		topCall := &t.callstack[0]
 		topCall.TraceID = util.ToHash([]string{t.txID, "", "0"})
 		if topCall.failed() {
-			BlockCtx.BlockFile.ErrorTraces = append(BlockCtx.BlockFile.ErrorTraces, t.ToTrace(topCall, []int64{}))
+			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(topCall, []int64{}))
 		} else {
-			BlockCtx.BlockFile.Traces = append(BlockCtx.BlockFile.Traces, t.ToTrace(topCall, []int64{}))
+			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(topCall, []int64{}))
 		}
 		t.addTraceAndLog(topCall, []int64{})
 	}
@@ -307,13 +313,13 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 	}
 }
 
-func setStorageChange(cf *callFrame) {
+func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		BlockCtx.ChangeContracts[*cf.To] = struct{}{}
+		ChangeContracts[*cf.To] = struct{}{}
 	}
 	subCallStorageChange := false
 	for i := range cf.Calls {
-		setStorageChange(&cf.Calls[i])
+		setStorageChange(&cf.Calls[i], ChangeContracts)
 		if cf.Calls[i].StorageChange && !cf.Calls[i].failed() {
 			subCallStorageChange = true
 		}
@@ -334,16 +340,16 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 		cf.Logs[i].ID = util.ToHash([]string{cf.Logs[i].ParentTraceID, fmt.Sprintf("%d", cf.Logs[i].Position)})
 		if cf.failed() || cf.ParentFailed {
 			cf.Logs[i].LogIndex = 0
-			BlockCtx.BlockFile.ErrorEvents = append(BlockCtx.BlockFile.ErrorEvents, cf.Logs[i])
+			t.BlockFile.ErrorEvents = append(t.BlockFile.ErrorEvents, cf.Logs[i])
 		} else {
-			BlockCtx.BlockFile.Events = append(BlockCtx.BlockFile.Events, cf.Logs[i])
+			t.BlockFile.Events = append(t.BlockFile.Events, cf.Logs[i])
 		}
 	}
 	for i := range cf.Calls {
 		if cf.failed() || cf.ParentFailed {
-			BlockCtx.BlockFile.ErrorTraces = append(BlockCtx.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
+			t.BlockFile.ErrorTraces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		} else {
-			BlockCtx.BlockFile.Traces = append(BlockCtx.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
+			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		}
 	}
 }
