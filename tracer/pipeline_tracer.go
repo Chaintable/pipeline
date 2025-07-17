@@ -143,7 +143,7 @@ func (t *PipelineTracer) CaptureTxEnd(restGas uint64) {
 }
 
 func (t *PipelineTracer) OnTxStart(tx *types.Transaction, from common.Address) {
-	callTracer := newCallTracerRaw()
+	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(tx, from)
 	BlockCtx.Tx = tx
