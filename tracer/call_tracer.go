@@ -250,8 +250,7 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
-	size := len(t.callstack)
-	if size <= 1 {
+	if len(t.callstack) < 1 {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
