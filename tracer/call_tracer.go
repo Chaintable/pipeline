@@ -90,6 +90,7 @@ func (f *callFrame) processOutput(output []byte, err error) {
 
 type callTracer struct {
 	callstack []callFrame
+	config    callTracerConfig
 	gasLimit  uint64
 	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
@@ -101,8 +102,19 @@ type callTracer struct {
 	BlockFile       *ptypes.BlockFile
 }
 
+type callTracerConfig struct {
+	OnlyTopCall bool `json:"onlyTopCall"` // If true, call tracer won't collect any subcalls
+	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
+}
+
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
-	t := &callTracer{callstack: make([]callFrame, 0, 1), ChangeContracts: ChangeContracts, BlockFile: BlockFile}
+	t := &callTracer{callstack: make([]callFrame, 0, 1), config: callTracerConfig{
+		OnlyTopCall: false,
+		WithLog:     true,
+	},
+		ChangeContracts: ChangeContracts,
+		BlockFile:       BlockFile,
+	}
 	return t
 }
 
@@ -238,8 +250,7 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
-	size := len(t.callstack)
-	if size <= 1 {
+	if len(t.callstack) < 1 {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
@@ -259,6 +270,10 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 func (t *callTracer) OnLog(log *types.Log) {
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
+		return
+	}
+	size := len(t.callstack)
+	if size <= 1 {
 		return
 	}
 	topics := make([]string, len(log.Topics))
