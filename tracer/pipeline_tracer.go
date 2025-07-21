@@ -128,7 +128,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
-	callTracer := newCallTracerRaw()
+	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
 
