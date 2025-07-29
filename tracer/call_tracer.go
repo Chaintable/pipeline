@@ -265,15 +265,29 @@ func (t *callTracer) OnLog(log *types.Log) {
 		selector = topics[0]
 		remainingTopics = topics[1:]
 	}
+
+	var position int64
+	if len(t.callstack) > 0 {
+		position = int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs))
+	} else {
+		// 对于某些链(例如mantle),这个event发生在所有call之前,直接置为0并添加到最终的event中
+		position = 0
+	}
+
 	l := ptypes.Event{
 		Address:  strings.ToLower(log.Address.Hex()),
 		Selector: selector,
 		Topics:   remainingTopics,
 		Data:     log.Data,
-		Position: int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
+		Position: position,
 		LogIndex: int64(log.Index),
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
+
+	if len(t.callstack) > 0 {
+		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
+	} else {
+		t.BlockFile.Events = append(t.BlockFile.Events, l)
+	}
 }
 
 func (t *callTracer) GetResult() (json.RawMessage, error) {
