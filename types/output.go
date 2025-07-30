@@ -1,6 +1,6 @@
 package types
 
-import "github.com/ava-labs/libevm/common/hexutil"
+import "github.com/ethereum/go-ethereum/common/hexutil"
 
 type DebankOutPut struct {
 	BlockFile      *BlockFile    `json:"block_file"`

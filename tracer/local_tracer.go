@@ -3,12 +3,13 @@ package tracer
 import (
 	"math/big"
 	"strings"
+	"time"
 
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/common/hexutil"
-	"github.com/ava-labs/libevm/core/types"
-	"github.com/ava-labs/libevm/core/vm"
-	"github.com/ava-labs/libevm/log"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -57,9 +58,9 @@ func (t *LocalTracer) CaptureStart(env *vm.EVM, from common.Address, to common.A
 	}
 }
 
-func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, duration time.Duration, err error) {
 	if t.callTracer != nil {
-		t.callTracer.CaptureEnd(output, gasUsed, err)
+		t.callTracer.CaptureEnd(output, gasUsed, duration, err)
 	}
 }
 

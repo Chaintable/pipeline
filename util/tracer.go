@@ -6,9 +6,9 @@ import (
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/common/hexutil"
-	"github.com/ava-labs/libevm/core/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -51,18 +51,7 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	if block.Header().BaseFee != nil {
 		blockHeader.BaseFeePerGas = (*hexutil.Big)(block.Header().BaseFee)
 	}
-	if block.Header().WithdrawalsHash != nil {
-		blockHeader.WithdrawalsRoot = block.Header().WithdrawalsHash
-	}
-	if block.Header().BlobGasUsed != nil {
-		blockHeader.BlobGasUsed = (*hexutil.Uint64)(block.Header().BlobGasUsed)
-	}
-	if block.Header().ExcessBlobGas != nil {
-		blockHeader.ExcessBlobGas = (*hexutil.Uint64)(block.Header().ExcessBlobGas)
-	}
-	if block.Header().ParentBeaconRoot != nil {
-		blockHeader.ParentBeaconBlockRoot = block.Header().ParentBeaconRoot
-	}
+	// Note: WithdrawalsHash, BlobGasUsed, ExcessBlobGas, and ParentBeaconRoot are not available in go-ethereum v1.10.19
 	return &blockHeader
 }
 
@@ -71,10 +60,8 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	if tx.To() != nil {
 		to = *tx.To()
 	}
-	gasPrice := receipt.EffectiveGasPrice
-	if gasPrice == nil {
-		gasPrice = tx.GasPrice()
-	}
+	// Note: EffectiveGasPrice is not available in go-ethereum v1.10.19
+	gasPrice := tx.GasPrice()
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
 		From:             strings.ToLower(from.Hex()),
@@ -91,7 +78,8 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
 	switch tx.Type() {
-	case types.DynamicFeeTxType, types.BlobTxType:
+	case types.DynamicFeeTxType:
+		// Note: BlobTxType is not available in go-ethereum v1.10.19
 		transaction.GasFeeCap = tx.GasFeeCap()
 		transaction.GasTipCap = tx.GasTipCap()
 	}

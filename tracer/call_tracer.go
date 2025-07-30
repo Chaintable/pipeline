@@ -23,14 +23,15 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/ava-labs/libevm/accounts/abi"
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/common/hexutil"
-	"github.com/ava-labs/libevm/core/types"
-	"github.com/ava-labs/libevm/core/vm"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 )
 
 type callFrame struct {
@@ -193,7 +194,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 	t.callstack = append(t.callstack, call)
 }
 
-func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, duration time.Duration, err error) {
 	if len(t.callstack) != 1 {
 		return
 	}
