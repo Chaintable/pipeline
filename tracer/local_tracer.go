@@ -3,18 +3,19 @@ package tracer
 import (
 	"math/big"
 	"strings"
+	"time"
 
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/common/hexutil"
-	"github.com/ava-labs/libevm/core/types"
-	"github.com/ava-labs/libevm/core/vm"
-	"github.com/ava-labs/libevm/log"
+	"github.com/MetisProtocol/mvm/l2geth/common"
+	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
+	"github.com/MetisProtocol/mvm/l2geth/core/types"
+	"github.com/MetisProtocol/mvm/l2geth/core/vm"
+	"github.com/MetisProtocol/mvm/l2geth/log"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 )
 
-var _ vm.EVMLogger = (*LocalTracer)(nil)
+var _ EVMLogger = (*LocalTracer)(nil)
 
 type LocalTracer struct {
 	callTracer   *callTracer
@@ -51,16 +52,18 @@ func (t *LocalTracer) OnBlockStart(block *types.Block) {
 	}
 }
 
-func (t *LocalTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+func (t *LocalTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureStart(env, from, to, create, input, gas, value)
+		return t.callTracer.CaptureStart(from, to, create, input, gas, value)
 	}
+	return nil
 }
 
-func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureEnd(output, gasUsed, err)
+		return t.callTracer.CaptureEnd(output, gasUsed, tm, err)
 	}
+	return nil
 }
 
 func (t *LocalTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -75,10 +78,11 @@ func (t *LocalTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *LocalTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *LocalTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureFault(pc, op, gas, cost, scope, depth, err)
+		return t.callTracer.CaptureFault(env, pc, op, gas, cost, memory, stack, contract, depth, err)
 	}
+	return nil
 }
 
 func (t *LocalTracer) CaptureTxStart(gas uint64) {
@@ -103,10 +107,11 @@ func (t *LocalTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.currentBlock.BlockFile.Txs = append(t.currentBlock.BlockFile.Txs, tx)
 }
 
-func (t *LocalTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *LocalTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
+		return t.callTracer.CaptureState(env, pc, op, gas, cost, memory, stack, contract, depth, err)
 	}
+	return nil
 }
 
 func (t *LocalTracer) OnLog(log *types.Log) {

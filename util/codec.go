@@ -6,7 +6,7 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 
-	"github.com/ava-labs/libevm/rlp"
+	"github.com/MetisProtocol/mvm/l2geth/rlp"
 )
 
 func EncodeToJsonGzip(v any) ([]byte, error) {

@@ -7,11 +7,13 @@ import (
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/core/types"
-	"github.com/ava-labs/libevm/crypto"
-	"github.com/ava-labs/libevm/log"
-	"github.com/ava-labs/libevm/rlp"
+	"github.com/MetisProtocol/mvm/l2geth/common"
+	"github.com/MetisProtocol/mvm/l2geth/core"
+	"github.com/MetisProtocol/mvm/l2geth/core/state"
+	"github.com/MetisProtocol/mvm/l2geth/core/types"
+	"github.com/MetisProtocol/mvm/l2geth/crypto"
+	"github.com/MetisProtocol/mvm/l2geth/log"
+	"github.com/MetisProtocol/mvm/l2geth/rlp"
 	"github.com/holiman/uint256"
 )
 
@@ -57,10 +59,13 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		var account state.Account
+		if err := rlp.DecodeBytes(v, &account); err != nil {
+			panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
+			Balance:  uint256.MustFromBig(account.Balance),
 			Nonce:    uint64(account.Nonce),
 			CodeHash: common.BytesToHash(account.CodeHash),
 		})
@@ -103,7 +108,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc core.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)
@@ -114,11 +119,11 @@ func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStora
 			Address:  crypto.Keccak256Hash(addr[:]),
 			Balance:  uint256.MustFromBig(acc.Balance),
 			Nonce:    acc.Nonce,
-			CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
+			CodeHash: crypto.Keccak256Hash(acc.Code),
 		})
 		if len(acc.Code) > 0 {
 			diff.NewCodes = append(diff.NewCodes, ptypes.NewCode{
-				CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
+				CodeHash: crypto.Keccak256Hash(acc.Code),
 				Code:     acc.Code,
 			})
 		}

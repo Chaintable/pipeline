@@ -3,7 +3,7 @@ package types
 import (
 	"math/big"
 
-	"github.com/ava-labs/libevm/common/hexutil"
+	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
 )
 
 // id = to_hash(trace['tx_id'], trace['parent_trace_id'], trace['pos_in_parent_trace'])

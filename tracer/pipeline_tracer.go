@@ -6,17 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ava-labs/libevm/crypto"
+	"github.com/MetisProtocol/mvm/l2geth/core"
+	"github.com/MetisProtocol/mvm/l2geth/crypto"
 
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/ava-labs/libevm/common"
-	"github.com/ava-labs/libevm/core/types"
-	"github.com/ava-labs/libevm/core/vm"
-	"github.com/ava-labs/libevm/log"
-	"github.com/ava-labs/libevm/params"
+	"github.com/MetisProtocol/mvm/l2geth/common"
+	"github.com/MetisProtocol/mvm/l2geth/core/types"
+	"github.com/MetisProtocol/mvm/l2geth/core/vm"
+	"github.com/MetisProtocol/mvm/l2geth/log"
+	"github.com/MetisProtocol/mvm/l2geth/params"
 )
 
 // 需要上传3种data
@@ -24,7 +25,7 @@ import (
 // 2. state diff
 // 3. block file
 
-var _ vm.EVMLogger = (*PipelineTracer)(nil)
+var _ EVMLogger = (*PipelineTracer)(nil)
 
 type PipelineTracer struct {
 	config     PipelineTracerConfig
@@ -106,16 +107,18 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
 }
 
-func (t *PipelineTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+func (t *PipelineTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureStart(env, from, to, create, input, gas, value)
+		return t.callTracer.CaptureStart(from, to, create, input, gas, value)
 	}
+	return nil
 }
 
-func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureEnd(output, gasUsed, err)
+		return t.callTracer.CaptureEnd(output, gasUsed, tm, err)
 	}
+	return nil
 }
 
 func (t *PipelineTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -130,10 +133,11 @@ func (t *PipelineTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *PipelineTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *PipelineTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureFault(pc, op, gas, cost, scope, depth, err)
+		return t.callTracer.CaptureFault(env, pc, op, gas, cost, memory, stack, contract, depth, err)
 	}
+	return nil
 }
 
 func (t *PipelineTracer) CaptureTxStart(gas uint64) {
@@ -162,10 +166,11 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
-func (t *PipelineTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *PipelineTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
+		return t.callTracer.CaptureState(env, pc, op, gas, cost, memory, stack, contract, depth, err)
 	}
+	return nil
 }
 
 func (t *PipelineTracer) OnLog(log *types.Log) {
@@ -174,7 +179,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
@@ -341,5 +346,5 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 }
 
 func addressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
+	return crypto.Keccak256Hash(a.Bytes())
 }

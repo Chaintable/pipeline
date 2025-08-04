@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/ava-labs/libevm/metrics"
+	"github.com/MetisProtocol/mvm/l2geth/metrics"
 )
 
 var (
@@ -11,7 +11,7 @@ var (
 
 	LatestUploadedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_uploaded_block_number", nil)
 
-	NodeInfo = metrics.NewRegisteredGaugeInfo("pipeline/node_info", nil)
+	NodeInfo = NewRegisteredGaugeInfo("pipeline/node_info", nil)
 
 	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
 
