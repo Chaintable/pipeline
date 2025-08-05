@@ -1,12 +1,13 @@
 package tracer
 
 import (
+	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/MetisProtocol/mvm/l2geth/core"
 	"github.com/MetisProtocol/mvm/l2geth/crypto"
 
 	"github.com/Chaintable/pipeline/metrics"
@@ -42,10 +43,17 @@ type PipelineTracerConfig struct {
 	IsBackup         bool     `json:"is_backup"`
 }
 
-func NewPipelineTracer(config PipelineTracerConfig) (*PipelineTracer, error) {
+func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
+	var config PipelineTracerConfig
+	if cfg != nil {
+		if err := json.Unmarshal(cfg, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse config: %v", err)
+		}
+	}
 	t := &PipelineTracer{
 		config: config,
 	}
+
 	return t, nil
 }
 
@@ -179,7 +187,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}

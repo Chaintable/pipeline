@@ -8,7 +8,6 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/core"
 	"github.com/MetisProtocol/mvm/l2geth/core/state"
 	"github.com/MetisProtocol/mvm/l2geth/core/types"
 	"github.com/MetisProtocol/mvm/l2geth/crypto"
@@ -108,7 +107,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc core.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc ptypes.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)
