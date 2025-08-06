@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 
+	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -39,8 +41,26 @@ type pipelineTracerConfig struct {
 	Brokers              []string `json:"brokers"`
 	Topic                string   `json:"topic"`
 	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             bool     `json:"is_backup"`
+	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = manual master, true = manual backup
 	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
+
+	// Auto failover configurations
+	EtcdEndpoints []string `json:"etcd_endpoints"`
+	ElectionKey   string   `json:"election_key"`
+	NodeID        string   `json:"node_id"` // default to hostname
+}
+
+func (config *pipelineTracerConfig) fillDefaultValues() {
+	if config.IsBackup == nil && len(config.EtcdEndpoints) == 0 {
+		log.Crit("IsBackup is nil and etcd endpoints is empty, please set IsBackup to true(manual mode) or add etcd endpoints(auto mode)")
+	}
+	if config.NodeID == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Crit("Failed to get hostname", "err", err)
+		}
+		config.NodeID = hostname
+	}
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -50,6 +70,8 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 			return nil, fmt.Errorf("failed to parse config: %v", err)
 		}
 	}
+	config.fillDefaultValues()
+
 	t := &PipelineTracer{
 		config: config,
 	}
@@ -58,10 +80,29 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
-	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.S3TempDir, t.config.IsBackup)
+
+	// set default election key
+	if t.config.ElectionKey == "" {
+		t.config.ElectionKey = "/nodex/leader/" + chainConfig.ChainID.String()
+	}
+
+	// Initialize pipeline
+	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket,
+		t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(),
+		t.config.S3TempDir)
+
 	if err != nil {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
+
+	// Setup leader election based on configuration
+	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
+		t.config.NodeID, t.config.IsBackup)
+	if err != nil {
+		log.Error("Failed to setup leader election", "err", err)
+		// Continue without election - will remain in backup mode
+	}
+
 	metrics.NodeInfo.Update(map[string]string{
 		"chain_id": chainConfig.ChainID.String(),
 		"role":     "writer",
@@ -69,7 +110,19 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 }
 
 func (t *PipelineTracer) OnClose() {
-	NodeXPusher.Close()
+	// Close leader manager if it exists
+	if LeaderManager != nil {
+		LeaderManager.Close()
+		// Clear global reference
+		leader.GlobalManager = nil
+	}
+	// Close processors
+	if NodeXPusher != nil {
+		NodeXPusher.Close()
+	}
+	if ChainTableBucketPusher != nil {
+		ChainTableBucketPusher.Close()
+	}
 }
 
 func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {

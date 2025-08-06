@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -25,40 +26,34 @@ type PushProcessor struct {
 	S3TempDir       string
 	quitCh          chan struct{}
 	S3DataCh        chan *DataFile
-	IsBackup        bool
+	Brokers         []string
+	Topic           string
 }
 
-func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string, isBackup bool) (*PushProcessor, error) {
-	kafkaReader := util.NewKafkaReader(brokers, topic, "")
+func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string) (*PushProcessor, error) {
 	kafkaWriter := util.NewKafkaWriter(brokers, topic)
 	s3Uploader, err := util.NewS3Client(region)
 	if err != nil {
 		return nil, err
 	}
 
-	var lastBlockNotice *types.BlockChangeNotification
-
-	lastBlockNotice, err = util.GetLastBlockNotice(kafkaReader)
-	if err != nil {
-		return nil, err
-	}
-	defer kafkaReader.Close()
-
-	log.Printf("last block notice: %+v\n", lastBlockNotice)
-
 	if s3TempDir != "" {
 		s3TempDir = filepath.Join(s3TempDir, bucket)
 	}
 
 	pusher := &PushProcessor{
-		Bucket:          bucket,
-		Uploader:        s3Uploader,
-		KafkaWriter:     kafkaWriter,
-		LastBlockNotice: lastBlockNotice,
-		S3TempDir:       s3TempDir,
-		quitCh:          make(chan struct{}),
-		S3DataCh:        make(chan *DataFile, 100),
-		IsBackup:        isBackup,
+		Bucket:      bucket,
+		Uploader:    s3Uploader,
+		KafkaWriter: kafkaWriter,
+		S3TempDir:   s3TempDir,
+		quitCh:      make(chan struct{}),
+		S3DataCh:    make(chan *DataFile, 100),
+		Brokers:     brokers,
+		Topic:       topic,
+	}
+	err = pusher.UpdateLastBlock()
+	if err != nil {
+		return nil, err
 	}
 
 	if s3TempDir != "" {
@@ -67,7 +62,24 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 			return nil, err
 		}
 	}
+
 	return pusher, nil
+}
+
+func (p *PushProcessor) UpdateLastBlock() error {
+	kafkaReader := util.NewKafkaReader(p.Brokers, p.Topic, "")
+	defer kafkaReader.Close()
+
+	lastBlockNotice, err := util.GetLastBlockNotice(kafkaReader)
+	if err != nil {
+		return err
+	}
+	log.Printf("update last block notice: %+v\n", lastBlockNotice)
+
+	// Simply update the last block notice without locking
+	// The locking should be handled at a higher level if needed
+	p.LastBlockNotice = lastBlockNotice
+	return nil
 }
 
 func (p *PushProcessor) uploadWork() error {
@@ -176,7 +188,7 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 	}()
 	times := 0
 	for {
-		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, !p.IsBackup)
+		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
 		if err != nil {
 			if times > 3 {
 				return err
@@ -199,7 +211,7 @@ func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 		go func(file *DataFile) {
 			times := 0
 			for {
-				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, !p.IsBackup)
+				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
 				if err != nil {
 					if times > 3 {
 						lock.Lock()
@@ -233,11 +245,14 @@ func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
 }
 
 func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification) error {
-	if p.IsBackup {
-		// 如果是备份模式，直接返回
-		log.Printf("backup mode, skip push block change notification\n")
+	leader.GlobalManager.Lock()
+	defer leader.GlobalManager.Unlock()
+
+	if !leader.GlobalManager.Election.IsLeaderNode {
+		log.Printf("backup node, skip push block change notification\n")
 		return nil
 	}
+
 	if len(blockNotice.NewBlocks) > 1 {
 		// 1. 首先检查 newBlocks 是否满足我们想要的严格顺序和父子关系
 		valid := true

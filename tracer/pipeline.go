@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -36,18 +37,65 @@ var (
 	ChainTableBucketPusher *processor.PushProcessor
 	BlockCtx               *ExtraInfo
 	BizChainID             string
+	LeaderManager          *leader.Manager
 )
 
-func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string, isBackup bool) (err error) {
-	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir, isBackup)
+func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string) (err error) {
+	// Create processors
+	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
-	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic, s3TmpDir, isBackup)
+	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
+
 	BizChainID = bizChainID
+	return nil
+}
+
+// SetupLeaderElection sets up leader election for the processors
+func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool) error {
+	// Create a single leader manager for both processors
+	config := leader.ManagerConfig{
+		EtcdEndpoints: etcdEndpoints,
+		ElectionKey:   electionKey,
+		NodeID:        nodeID,
+		IsBackup:      isBackup,
+		OnBecomeLeader: func() error {
+			// Update last block when becoming leader
+			log.Info("Updating last block info on leader transition")
+			if NodeXPusher != nil {
+				if err := NodeXPusher.UpdateLastBlock(); err != nil {
+					log.Error("Failed to update NodeX last block", "err", err)
+				}
+			}
+			if ChainTableBucketPusher != nil {
+				if err := ChainTableBucketPusher.UpdateLastBlock(); err != nil {
+					log.Error("Failed to update ChainTable last block", "err", err)
+				}
+			}
+			return nil
+		},
+		OnLoseLeader: func() error {
+			// Nothing special to do when losing leadership
+			return nil
+		},
+	}
+
+	var err error
+	leader.GlobalManager, err = leader.NewManager(config)
+	if err != nil {
+		return fmt.Errorf("failed to create leader manager: %w", err)
+	}
+
+	if err := leader.GlobalManager.Start(); err != nil {
+		return fmt.Errorf("failed to start leader manager: %w", err)
+	}
+
+	log.Info("Leader election setup completed", "nodeID", nodeID, "electionKey", electionKey)
+
 	return nil
 }
 
