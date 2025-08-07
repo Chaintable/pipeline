@@ -51,10 +51,6 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		Brokers:     brokers,
 		Topic:       topic,
 	}
-	err = pusher.UpdateLastBlock()
-	if err != nil {
-		return nil, err
-	}
 
 	return pusher, nil
 }
