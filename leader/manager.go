@@ -63,7 +63,6 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		})
 
 		m.Election = election
-
 	}
 
 	return m, nil
@@ -109,7 +108,6 @@ func (m *Manager) RLock() {
 func (m *Manager) RUnlock() {
 	m.Election.LeaderMutex.RUnlock()
 }
-
 
 func (m *Manager) Stop() error {
 	if m.Election != nil {

@@ -56,13 +56,6 @@ func NewPushProcessor(region string, bucket string, brokers []string, topic stri
 		return nil, err
 	}
 
-	if s3TempDir != "" {
-		err = pusher.uploadWork()
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return pusher, nil
 }
 
@@ -79,6 +72,13 @@ func (p *PushProcessor) UpdateLastBlock() error {
 	// Simply update the last block notice without locking
 	// The locking should be handled at a higher level if needed
 	p.LastBlockNotice = lastBlockNotice
+	return nil
+}
+
+func (p *PushProcessor) StartUploadWork() error {
+	if p.S3TempDir != "" {
+		return p.uploadWork()
+	}
 	return nil
 }
 

@@ -103,6 +103,16 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 		// Continue without election - will remain in backup mode
 	}
 
+	// start upload work should be after leader election
+	err = NodeXPusher.StartUploadWork()
+	if err != nil {
+		log.Crit("Failed to start NodeXPusher upload work", "err", err)
+	}
+	err = ChainTableBucketPusher.StartUploadWork()
+	if err != nil {
+		log.Crit("Failed to start ChainTableBucketPusher upload work", "err", err)
+	}
+
 	metrics.NodeInfo.Update(map[string]string{
 		"chain_id": chainConfig.ChainID.String(),
 		"role":     "writer",
