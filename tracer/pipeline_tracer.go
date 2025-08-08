@@ -56,11 +56,17 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 		log.Crit("IsBackup is nil and etcd endpoints is empty, please set IsBackup to true(manual mode) or add etcd endpoints(auto mode)")
 	}
 	if config.NodeID == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			log.Crit("Failed to get hostname", "err", err)
+		// 先尝试从环境变量 HOSTNAME 读取
+		if hostname := os.Getenv("HOSTNAME"); hostname != "" {
+			config.NodeID = hostname
+		} else {
+			// 如果环境变量不存在，则使用系统主机名
+			hostname, err := os.Hostname()
+			if err != nil {
+				log.Crit("Failed to get hostname", "err", err)
+			}
+			config.NodeID = hostname
 		}
-		config.NodeID = hostname
 	}
 	if config.GracePeriod == 0 {
 		config.GracePeriod = 10
