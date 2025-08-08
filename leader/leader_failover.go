@@ -99,7 +99,7 @@ func (lf *LeaderFailover) tryToBecomeLeader() error {
 	ctx, cancel := context.WithTimeout(lf.ctx, 5*time.Second)
 	defer cancel()
 
-	if lf.getCurrentLeader() == "" {
+	if lf.getCurrentLeader() != "" {
 		return nil
 	}
 
