@@ -244,13 +244,18 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	leader.GlobalManager.Lock()
 	defer leader.GlobalManager.Unlock()
 
-	if leader.GlobalManager.ManualMode && leader.GlobalManager.IsManualBackup {
-		log.Printf("backup in fixed node, skip push block change notification\n")
-		return nil
-	}
-	if !leader.GlobalManager.LeaderFailover.IsLeaderNode {
-		log.Printf("backup in etcd node, skip push block change notification\n")
-		return nil
+	if leader.GlobalManager.ManualMode {
+		// backup in fixed mode
+		if leader.GlobalManager.IsManualBackup {
+			log.Printf("backup in fixed node, skip push block change notification\n")
+			return nil
+		}
+	} else {
+		// backup in etcd-based failover mode
+		if !leader.GlobalManager.LeaderFailover.IsLeaderNode {
+			log.Printf("backup in etcd node, skip push block change notification\n")
+			return nil
+		}
 	}
 
 	if len(blockNotice.NewBlocks) > 1 {
