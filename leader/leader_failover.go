@@ -55,8 +55,12 @@ func (lf *LeaderFailover) SetCallbacks(callbacks LeaderCallbacks) {
 }
 
 func (lf *LeaderFailover) Start() error {
+	// initial connection to etcd timeout: 5s
+	ctx, cancel := context.WithTimeout(lf.ctx, 5*time.Second)
+	defer cancel()
+
 	// Read current leader from etcd
-	resp, err := lf.client.Get(lf.ctx, lf.key)
+	resp, err := lf.client.Get(ctx, lf.key)
 	if err != nil {
 		return fmt.Errorf("[Leader Failover] failed to get current leader: %w", err)
 	}

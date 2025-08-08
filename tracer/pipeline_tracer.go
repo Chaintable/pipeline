@@ -111,7 +111,7 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
 		t.config.NodeID, t.config.IsBackup, t.config.GracePeriod)
 	if err != nil {
-		log.Error("Failed to setup leader election", "err", err)
+		log.Crit("Failed to setup leader election", "err", err)
 		// Continue without election - will remain in backup mode
 	}
 

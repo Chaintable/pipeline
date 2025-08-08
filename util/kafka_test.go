@@ -33,10 +33,10 @@ func TestKafkaWriter(t *testing.T) {
 		ChangeType: 1,
 		NewBlocks: []types.BlockContext{
 			{
-				Hash:        common.HexToHash("0xcfb992a205919e03da9d2235203316bfa2aaa6e1cf7d5bb95bb0b5d2a2fe3a66"),
-				ParentHash:  common.HexToHash("0xd6a0a4f986289f3d2e77f9e19779c7c8e1341d612d10ad4c59e54ceffdaebb61"),
-				BlockNumber: 2713851,
-				Timestamp:   1480374012,
+				Hash:        common.HexToHash("0x22bb8dfd05df5b0617ea3d22eb072df91e4e425f30027b32d29d842196f2a824"),
+				ParentHash:  common.HexToHash("0x1ceec5f210f06014ab8a1ff5e49366a79c6cbe83284ab6749c977b3bc65638c9"),
+				BlockNumber: 2716678,
+				Timestamp:   1480429483,
 			},
 		},
 		DropBlocks: nil,
