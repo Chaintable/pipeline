@@ -13,6 +13,7 @@ type Manager struct {
 	LeaderFailover *LeaderFailover // etcd-based failover mode
 	ManualMode     bool            // Fixed mode (no etcd)
 	IsManualBackup bool
+	config         *ManagerConfig
 }
 
 type ManagerConfig struct {
@@ -25,8 +26,10 @@ type ManagerConfig struct {
 	GracePeriod    time.Duration
 }
 
-func NewManager(cfg ManagerConfig) (*Manager, error) {
-	m := &Manager{}
+func NewManager(cfg *ManagerConfig) (*Manager, error) {
+	m := &Manager{
+		config: cfg,
+	}
 
 	if cfg.IsBackup != nil {
 		// Fixed mode - set fixed backup state (no etcd needed)
@@ -72,9 +75,8 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 }
 
 func (m *Manager) Start() error {
-	if m.ManualMode {
-		// Fixed backup mode - nothing to start
-		return nil
+	if m.ManualMode && !m.IsManualBackup {
+		return m.config.OnBecomeLeader()
 	}
 	if m.LeaderFailover != nil {
 		return m.LeaderFailover.Start()

@@ -86,7 +86,7 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	}
 
 	var err error
-	leader.GlobalManager, err = leader.NewManager(config)
+	leader.GlobalManager, err = leader.NewManager(&config)
 	if err != nil {
 		return fmt.Errorf("failed to create leader manager: %w", err)
 	}
