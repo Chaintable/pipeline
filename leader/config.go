@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Config is the configuration for leader election
+// Config is the configuration for etcd-based failover mode
 type Config struct {
 	Endpoints   []string
 	Key         string
@@ -18,4 +18,3 @@ type LeaderCallbacks struct {
 	OnBecomeLeader func(ctx context.Context) error
 	OnLoseLeader   func(ctx context.Context) error
 }
-

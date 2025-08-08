@@ -55,14 +55,15 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	return nil
 }
 
-// SetupLeaderElection sets up leader election for the processors
-func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool) error {
+// SetupLeaderElection sets up manual leader election for the processors
+func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int) error {
 	// Create a single leader manager for both processors
 	config := leader.ManagerConfig{
 		EtcdEndpoints: etcdEndpoints,
 		ElectionKey:   electionKey,
 		NodeID:        nodeID,
 		IsBackup:      isBackup,
+		GracePeriod:   time.Duration(gracePeriod) * time.Second,
 		OnBecomeLeader: func() error {
 			// Update last block when becoming leader
 			log.Info("Updating last block info on leader transition")

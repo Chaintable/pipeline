@@ -10,115 +10,132 @@ import (
 var GlobalManager *Manager
 
 type Manager struct {
-	Election       *LeaderElectionMutex
-	manualMode     bool
-	isManualBackup bool
+	LeaderFailover *LeaderFailover // etcd-based failover mode
+	ManualMode     bool            // Fixed mode (no etcd)
+	IsManualBackup bool
 }
 
 type ManagerConfig struct {
 	EtcdEndpoints  []string
 	ElectionKey    string
 	NodeID         string
-	IsBackup       *bool // nil = use etcd, non-nil = manual mode with specified value
+	IsBackup       *bool // nil = use etcd failover, non-nil = fixed mode
 	OnBecomeLeader func() error
 	OnLoseLeader   func() error
+	GracePeriod    time.Duration
 }
 
 func NewManager(cfg ManagerConfig) (*Manager, error) {
 	m := &Manager{}
 
 	if cfg.IsBackup != nil {
-		// Manual mode - set fixed backup state
-		m.manualMode = true
-		m.isManualBackup = *cfg.IsBackup
-		log.Printf("[Manager] Created in manual mode, isBackup=%v", *cfg.IsBackup)
+		// Fixed mode - set fixed backup state (no etcd needed)
+		m.ManualMode = true
+		m.IsManualBackup = *cfg.IsBackup
+		log.Printf("NodeID: %s Created in fixed mode, isBackup=%v", cfg.NodeID, *cfg.IsBackup)
 	} else {
+		// Use etcd-based failover
 		electionCfg := Config{
 			Endpoints:   cfg.EtcdEndpoints,
 			Key:         cfg.ElectionKey,
 			NodeID:      cfg.NodeID,
-			GracePeriod: 10 * time.Second,
+			GracePeriod: cfg.GracePeriod,
 		}
 
-		election, err := NewLeaderElectionMutex(electionCfg)
-		if err != nil {
-			return nil, err
-		}
-
-		election.SetCallbacks(LeaderCallbacks{
+		callbacks := LeaderCallbacks{
 			OnBecomeLeader: func(ctx context.Context) error {
-				log.Printf("[Manager] Becoming leader, setting backup to false")
+				log.Printf("NodeID: %s Becoming leader", cfg.NodeID)
 				if cfg.OnBecomeLeader != nil {
 					return cfg.OnBecomeLeader()
 				}
 				return nil
 			},
 			OnLoseLeader: func(ctx context.Context) error {
-				log.Printf("[Manager] Losing leader, setting backup to true")
+				log.Printf("NodeID: %s Losing leader", cfg.NodeID)
 				if cfg.OnLoseLeader != nil {
 					return cfg.OnLoseLeader()
 				}
 				return nil
 			},
-		})
+		}
 
-		m.Election = election
+		leaderFailover, err := NewLeaderFailover(electionCfg)
+		if err != nil {
+			return nil, err
+		}
+		leaderFailover.SetCallbacks(callbacks)
+		m.LeaderFailover = leaderFailover
+		log.Printf("NodeID: %s Created with failover mode", cfg.NodeID)
 	}
 
 	return m, nil
 }
 
 func (m *Manager) Start() error {
-	if m.manualMode {
-		// Manual mode - nothing to start
+	if m.ManualMode {
+		// Fixed backup mode - nothing to start
 		return nil
 	}
-	if m.Election != nil {
-		return m.Election.Start()
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.Start()
 	}
 	return nil
 }
 
 func (m *Manager) IsLeader() bool {
-	if m.manualMode {
-		return !m.isManualBackup
+	if m.ManualMode {
+		return !m.IsManualBackup
 	}
-	return m.Election.IsLeader()
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.IsLeader()
+	}
+	return false
 }
 
 func (m *Manager) IsBackup() bool {
-	if m.manualMode {
-		return m.isManualBackup
+	if m.ManualMode {
+		return m.IsManualBackup
 	}
-	return m.Election.IsBackup()
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.IsBackup()
+	}
+	return true // Default to backup
 }
 
 func (m *Manager) Lock() {
-	m.Election.LeaderMutex.Lock()
+	if m.LeaderFailover != nil {
+		m.LeaderFailover.LeaderMutex.Lock()
+	}
 }
 
 func (m *Manager) Unlock() {
-	m.Election.LeaderMutex.Unlock()
+	if m.LeaderFailover != nil {
+		m.LeaderFailover.LeaderMutex.Unlock()
+	}
 }
 
 func (m *Manager) RLock() {
-	m.Election.LeaderMutex.RLock()
+	if m.LeaderFailover != nil {
+		m.LeaderFailover.LeaderMutex.RLock()
+	}
 }
 
 func (m *Manager) RUnlock() {
-	m.Election.LeaderMutex.RUnlock()
+	if m.LeaderFailover != nil {
+		m.LeaderFailover.LeaderMutex.RUnlock()
+	}
 }
 
 func (m *Manager) Stop() error {
-	if m.Election != nil {
-		return m.Election.Stop()
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.Stop()
 	}
 	return nil
 }
 
 func (m *Manager) Close() error {
-	if m.Election != nil {
-		return m.Election.Close()
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.Close()
 	}
 	return nil
 }

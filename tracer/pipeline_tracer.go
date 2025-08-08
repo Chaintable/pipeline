@@ -41,13 +41,14 @@ type pipelineTracerConfig struct {
 	Brokers              []string `json:"brokers"`
 	Topic                string   `json:"topic"`
 	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = manual master, true = manual backup
+	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
 	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
 	ElectionKey   string   `json:"election_key"`
-	NodeID        string   `json:"node_id"` // default to hostname
+	NodeID        string   `json:"node_id"`      // default to hostname
+	GracePeriod   int      `json:"grace_period"` // default to 10 seconds, unit is second
 }
 
 func (config *pipelineTracerConfig) fillDefaultValues() {
@@ -61,6 +62,9 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 		}
 		config.NodeID = hostname
 	}
+	if config.GracePeriod == 0 {
+		config.GracePeriod = 10
+	}
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -71,6 +75,8 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 		}
 	}
 	config.fillDefaultValues()
+
+	log.Info("NewPipelineTracer", "config", config)
 
 	t := &PipelineTracer{
 		config: config,
@@ -97,7 +103,7 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 
 	// Setup leader election based on configuration
 	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.IsBackup)
+		t.config.NodeID, t.config.IsBackup, t.config.GracePeriod)
 	if err != nil {
 		log.Error("Failed to setup leader election", "err", err)
 		// Continue without election - will remain in backup mode
