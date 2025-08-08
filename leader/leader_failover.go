@@ -163,11 +163,6 @@ func (lf *LeaderFailover) watchLeaderChangesFromRevision(revision int64) {
 	}
 }
 
-// Keep the original watchLeaderChanges for compatibility if needed
-func (lf *LeaderFailover) watchLeaderChanges() {
-	lf.watchLeaderChangesFromRevision(0)
-}
-
 func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 	switch event.Type {
 	case clientv3.EventTypePut:
@@ -175,7 +170,7 @@ func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 		oldLeader := lf.getCurrentLeader()
 		lf.currentLeader.Store(newLeader)
 
-		log.Printf("[Leader Failover] Leader changed from %s to %s", oldLeader, newLeader)
+		log.Printf("[Leader Failover] Leader changed from %s to %s, Current node %s", oldLeader, newLeader, lf.nodeID)
 
 		lf.LeaderMutex.Lock()
 		wasLeader := lf.IsLeaderNode
@@ -189,7 +184,7 @@ func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 			lf.loseLeadership()
 		} else if newLeader != lf.nodeID && !wasLeader {
 			// Still backup, just different leader
-			log.Printf("[Leader Failover] Node %s remains in BACKUP mode, new leader is %s", lf.nodeID, newLeader)
+			log.Printf("[Leader Failover] Current Node %s remains in BACKUP mode, new leader is %s", lf.nodeID, newLeader)
 		}
 
 	case clientv3.EventTypeDelete:
@@ -217,7 +212,7 @@ func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 
 func (lf *LeaderFailover) becomeLeader() {
 	// Wait for the old leader to do cleanup
-	log.Printf("[Leader Failover] Node %s waiting grace period (%v) before becoming leader", lf.nodeID, lf.gracePeriod)
+	log.Printf("[Leader Failover] Current node %s waiting grace period (%v) before becoming leader", lf.nodeID, lf.gracePeriod)
 	time.Sleep(lf.gracePeriod)
 
 	lf.LeaderMutex.Lock()
@@ -229,10 +224,10 @@ func (lf *LeaderFailover) becomeLeader() {
 	}
 
 	lf.IsLeaderNode = true
-	log.Printf("[Leader Failover] Node %s became LEADER", lf.nodeID)
+	log.Printf("[Leader Failover] Current node %s became LEADER", lf.nodeID)
 
 	if err := lf.callbacks.OnBecomeLeader(lf.ctx); err != nil {
-		log.Printf("[Leader Failover] Node %s failed to execute OnBecomeLeader callback: %v", lf.nodeID, err)
+		log.Printf("[Leader Failover] Current node %s failed to execute OnBecomeLeader callback: %v", lf.nodeID, err)
 	}
 }
 
@@ -249,11 +244,11 @@ func (lf *LeaderFailover) loseLeadership() {
 	defer cancel()
 
 	if err := lf.callbacks.OnLoseLeader(ctx); err != nil {
-		log.Printf("[Leader Failover] Node %s failed to execute OnLoseLeader callback: %v", lf.nodeID, err)
+		log.Printf("[Leader Failover] Current node %s failed to execute OnLoseLeader callback: %v", lf.nodeID, err)
 	}
 
 	lf.IsLeaderNode = false
-	log.Printf("[Leader Failover] Node %s is now in BACKUP mode", lf.nodeID)
+	log.Printf("[Leader Failover] Current node %s is now in BACKUP mode", lf.nodeID)
 }
 
 func (lf *LeaderFailover) IsLeader() bool {

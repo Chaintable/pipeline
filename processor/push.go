@@ -244,7 +244,7 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	leader.GlobalManager.Lock()
 	defer leader.GlobalManager.Unlock()
 
-	if leader.GlobalManager.ManualMode && !leader.GlobalManager.IsManualBackup {
+	if leader.GlobalManager.ManualMode && leader.GlobalManager.IsManualBackup {
 		log.Printf("backup in fixed node, skip push block change notification\n")
 		return nil
 	}
