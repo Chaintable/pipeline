@@ -33,10 +33,10 @@ func TestKafkaWriter(t *testing.T) {
 		ChangeType: 1,
 		NewBlocks: []types.BlockContext{
 			{
-				Hash:        common.HexToHash("0x22bb8dfd05df5b0617ea3d22eb072df91e4e425f30027b32d29d842196f2a824"),
-				ParentHash:  common.HexToHash("0x1ceec5f210f06014ab8a1ff5e49366a79c6cbe83284ab6749c977b3bc65638c9"),
-				BlockNumber: 2716678,
-				Timestamp:   1480429483,
+				Hash:        common.HexToHash("0x6976c80455f9f81526a7507114e1efe8e49558887e0aa7318b795853e5fe8ff6"),
+				ParentHash:  common.HexToHash("0x64786bd9fefb480d4f3ed0b3f62b870e69c11bc6dc96c02c2ccc6f308bcb90c2"),
+				BlockNumber: 5711598,
+				Timestamp:   1527817842,
 			},
 		},
 		DropBlocks: nil,
@@ -49,6 +49,7 @@ func TestKafkaWriter(t *testing.T) {
 
 // 查看kafka的offset
 func TestKafkaReader1(t *testing.T) {
+	t.Log("1132")
 	reader := NewKafkaReader([]string{"localhost:9092"}, "nodex_pipeline_1_tmp", "")
 	reader.SetOffset(0)
 	lag, a := reader.ReadLag(context.Background())

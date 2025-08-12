@@ -8,6 +8,7 @@ import (
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
+	"github.com/Chaintable/pipeline/writer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -38,6 +39,7 @@ var (
 	BlockCtx               *ExtraInfo
 	BizChainID             string
 	LeaderManager          *leader.Manager
+	WriterRegistry         *writer.WriterRegistry
 )
 
 func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string) (err error) {
@@ -55,8 +57,18 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	return nil
 }
 
+// WriterRegistryConfig holds configuration for writer node registration
+type WriterRegistryConfig struct {
+	TTL              int64
+	NodeXBucket      string
+	ChainTableBucket string
+	Region           string
+	Brokers          []string
+	Topic            string
+}
+
 // SetupLeaderElection sets up manual leader election for the processors
-func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int) error {
+func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int, writerConfig *WriterRegistryConfig) error {
 	// Create a single leader manager for both processors
 	config := leader.ManagerConfig{
 		EtcdEndpoints: etcdEndpoints,
@@ -80,7 +92,6 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 			return nil
 		},
 		OnLoseLeader: func() error {
-			// Nothing special to do when losing leadership
 			return nil
 		},
 	}
@@ -89,6 +100,30 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	leader.GlobalManager, err = leader.NewManager(&config)
 	if err != nil {
 		return fmt.Errorf("failed to create leader manager: %w", err)
+	}
+
+	// Initialize writer registry in failover mode
+	if writerConfig != nil {
+		// Use the same etcd client from leader manager
+		etcdClient := leader.GlobalManager.GetEtcdClient()
+
+		// Create writer node info
+		nodeInfo := writer.WriterNodeInfo{
+			NodeXBucket:      writerConfig.NodeXBucket,
+			ChainTableBucket: writerConfig.ChainTableBucket,
+			Region:           writerConfig.Region,
+			Brokers:          writerConfig.Brokers,
+			Topic:            writerConfig.Topic,
+		}
+
+		WriterRegistry = writer.NewWriterRegistry(etcdClient, BizChainID, nodeID, nodeInfo, writerConfig.TTL)
+
+		// Register node immediately when initialized (not waiting to become leader)
+		if err := WriterRegistry.RegisterNode(); err != nil {
+			log.Error("Failed to register writer node during initialization", "err", err)
+		} else {
+			log.Info("Writer node registered during initialization", "chainID", BizChainID, "nodeID", nodeID)
+		}
 	}
 
 	if err := leader.GlobalManager.Start(); err != nil {

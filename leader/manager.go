@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // GlobalManager is a global reference to the leader manager
@@ -138,6 +140,14 @@ func (m *Manager) Stop() error {
 func (m *Manager) Close() error {
 	if m.LeaderFailover != nil {
 		return m.LeaderFailover.Close()
+	}
+	return nil
+}
+
+// GetEtcdClient returns the etcd client from the leader failover instance
+func (m *Manager) GetEtcdClient() *clientv3.Client {
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.client
 	}
 	return nil
 }
