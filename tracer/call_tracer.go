@@ -29,7 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 )
@@ -67,13 +66,8 @@ func (f callFrame) failed() bool {
 	return len(f.Error) > 0
 }
 
-func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
+func (f *callFrame) processOutput(output []byte, err error) {
 	output = common.CopyBytes(output)
-	// Clear error if tx wasn't reverted. This happened
-	// for pre-homestead contract storage OOG.
-	if err != nil && !reverted {
-		err = nil
-	}
 	if err == nil {
 		f.Output = output
 		return
@@ -101,14 +95,17 @@ type callTracer struct {
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
-	txID string
-
 	ChangeContracts map[common.Address]struct{}
-	BlockFile       *ptypes.BlockFile
+	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
+
+	txID string
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
-	t := &callTracer{callstack: make([]callFrame, 0, 1), ChangeContracts: ChangeContracts, BlockFile: BlockFile}
+	t := &callTracer{callstack: make([]callFrame, 0, 1),
+		ChangeContracts: ChangeContracts,
+		BlockFile:       BlockFile,
+	}
 	return t
 }
 
@@ -163,21 +160,39 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	}
 }
 
-func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	if vm.OpCode(opcode) == vm.SSTORE {
+func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+	if op == vm.SSTORE {
 		t.callstack[len(t.callstack)-1].SelfStorageChange = true
 		t.callstack[len(t.callstack)-1].StorageChange = true
 	}
 }
 
-// OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
-	t.depth = depth
-	// Skip if tracing was interrupted
-	if t.interrupt.Load() {
+func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+	toCopy := to
+	callType := vm.CALL
+	if create {
+		callType = vm.CREATE
+	}
+	call := callFrame{
+		Type:  callType,
+		From:  from,
+		To:    &toCopy,
+		Input: common.CopyBytes(input),
+		Gas:   t.gasLimit,
+		Value: value,
+	}
+	t.callstack = append(t.callstack, call)
+}
+
+func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	if len(t.callstack) != 1 {
 		return
 	}
+	t.callstack[0].GasUsed = gasUsed
+	t.callstack[0].processOutput(output, err)
+}
 
+func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
 	call := callFrame{
 		Type:  vm.OpCode(typ),
@@ -190,16 +205,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 	t.callstack = append(t.callstack, call)
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if depth == 0 {
-		t.captureEnd(output, gasUsed, err, reverted)
-		return
-	}
-
-	t.depth = depth - 1
-
+func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	size := len(t.callstack)
 	if size <= 1 {
 		return
@@ -209,23 +215,23 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
-	call.GasUsed = gasUsed
-	call.processOutput(output, err, reverted)
-	// Nest call into parent.
-	// 忽略失败的调用
+	call.GasUsed = usedGas
+	call.processOutput(output, err)
 	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
-	if len(t.callstack) != 1 {
-		return
-	}
-	t.callstack[0].GasUsed = gasUsed
-	t.callstack[0].processOutput(output, err, reverted)
+func (*callTracer) CaptureTxStart(gasLimit uint64) {
 }
 
-func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
+func (*callTracer) CaptureTxEnd(restGas uint64) {
+}
+
+func (t *callTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+
+}
+
+func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
 }
@@ -233,6 +239,9 @@ func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, fr
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	// Error happened during tx validation.
 	if err != nil {
+		return
+	}
+	if len(t.callstack) < 1 {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
@@ -250,8 +259,11 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
-	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
+		return
+	}
+	size := len(t.callstack)
+	if size <= 1 {
 		return
 	}
 	topics := make([]string, len(log.Topics))
@@ -265,29 +277,15 @@ func (t *callTracer) OnLog(log *types.Log) {
 		selector = topics[0]
 		remainingTopics = topics[1:]
 	}
-
-	var position int64
-	if len(t.callstack) > 0 {
-		position = int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs))
-	} else {
-		// 对于某些链(例如mantle),这个event发生在所有call之前,直接置为0并添加到最终的event中
-		position = 0
-	}
-
 	l := ptypes.Event{
 		Address:  strings.ToLower(log.Address.Hex()),
 		Selector: selector,
 		Topics:   remainingTopics,
 		Data:     log.Data,
-		Position: position,
+		Position: int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
 		LogIndex: int64(log.Index),
 	}
-
-	if len(t.callstack) > 0 {
-		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
-	} else {
-		t.BlockFile.Events = append(t.BlockFile.Events, l)
-	}
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
 }
 
 func (t *callTracer) GetResult() (json.RawMessage, error) {
