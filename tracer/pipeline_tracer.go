@@ -63,10 +63,6 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	if err != nil {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
-	metrics.NodeInfo.Update(map[string]string{
-		"chain_id": chainConfig.ChainID.String(),
-		"role":     "writer",
-	})
 }
 
 func (t *PipelineTracer) OnClose() {
