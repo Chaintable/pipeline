@@ -13,17 +13,17 @@ var (
 
 	NodeInfo = metrics.NewRegisteredGaugeInfo("pipeline/node_info", nil)
 
-	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
+	BlockProcessTimer = metrics.GetOrRegisterCounter("pipeline/block_process", nil)
 
-	BlockTxExecutionTimer = metrics.NewRegisteredResettingTimer("pipeline/tx_execution", nil)
+	BlockTxExecutionTimer = metrics.GetOrRegisterCounter("pipeline/tx_execution", nil)
 
-	BlockHeaderUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_header_upload", nil)
+	BlockHeaderUploadTimer = metrics.GetOrRegisterCounter("pipeline/block_header_upload", nil)
 
-	StateDiffUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/state_diff_upload", nil)
+	StateDiffUploadTimer = metrics.GetOrRegisterCounter("pipeline/state_diff_upload", nil)
 
-	BlockFileUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_file_upload", nil)
+	BlockFileUploadTimer = metrics.GetOrRegisterCounter("pipeline/block_file_upload", nil)
 
-	BlockFileValidationTimer = metrics.NewRegisteredResettingTimer("pipeline/block_file_validation", nil)
+	BlockFileValidationTimer = metrics.GetOrRegisterCounter("pipeline/block_file_validation", nil)
 
-	BlockPushTimer = metrics.NewRegisteredResettingTimer("pipeline/block_push", nil)
+	BlockPushTimer = metrics.GetOrRegisterCounter("pipeline/block_push", nil)
 )
