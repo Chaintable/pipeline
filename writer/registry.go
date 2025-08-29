@@ -63,11 +63,72 @@ func (wr *WriterRegistry) RegisterNode() error {
 		return fmt.Errorf("failed to marshal node info: %w", err)
 	}
 
-	_, err = wr.client.Put(wr.ctx, nodeKey, string(nodeInfoBytes), clientv3.WithLease(wr.leaseID))
+	// Use transaction to ensure node ID uniqueness
+	// Check if key exists and if it does, verify if it has the same lease
+	getResp, err := wr.client.Get(wr.ctx, nodeKey)
 	if err != nil {
-		// Revoke lease if put failed
+		wr.lease.Revoke(context.Background(), wr.leaseID)
+		return fmt.Errorf("failed to check existing node: %w", err)
+	}
+
+	txn := wr.client.Txn(wr.ctx)
+	var txnResp *clientv3.TxnResponse
+	
+	if len(getResp.Kvs) == 0 {
+		// Key doesn't exist, try to create it
+		txnResp, err = txn.If(
+			clientv3.Compare(clientv3.CreateRevision(nodeKey), "=", 0),
+		).Then(
+			clientv3.OpPut(nodeKey, string(nodeInfoBytes), clientv3.WithLease(wr.leaseID)),
+		).Else(
+			clientv3.OpGet(nodeKey),
+		).Commit()
+	} else {
+		// Key exists, check if it has a lease (if no lease, the previous node died ungracefully)
+		existingLease := getResp.Kvs[0].Lease
+		if existingLease == 0 || existingLease == int64(wr.leaseID) {
+			// No lease or same lease (re-registration), we can take over
+			txnResp, err = txn.Then(
+				clientv3.OpPut(nodeKey, string(nodeInfoBytes), clientv3.WithLease(wr.leaseID)),
+			).Commit()
+		} else {
+			// Different lease exists, another node is active
+			// Create a fake failed transaction response
+			txnResp = &clientv3.TxnResponse{
+				Succeeded: false,
+			}
+			// We'll handle the error message below using getResp.Kvs
+			err = nil // Clear error as we want to handle it as a failed transaction
+		}
+	}
+
+	if err != nil {
+		// Revoke lease if transaction failed
 		wr.lease.Revoke(context.Background(), wr.leaseID)
 		return fmt.Errorf("failed to register node in etcd: %w", err)
+	}
+
+	if !txnResp.Succeeded {
+		// Node with same ID already exists, revoke our lease and panic
+		wr.lease.Revoke(context.Background(), wr.leaseID)
+		
+		// Get existing node info for error message
+		existingNode := ""
+		// Try to get from transaction response first
+		if len(txnResp.Responses) > 0 {
+			rangeResp := txnResp.Responses[0].GetResponseRange()
+			if rangeResp != nil && len(rangeResp.Kvs) > 0 {
+				existingNode = string(rangeResp.Kvs[0].Value)
+			}
+		}
+		// If not in transaction response, use the initial get response
+		if existingNode == "" && len(getResp.Kvs) > 0 {
+			existingNode = string(getResp.Kvs[0].Value)
+		}
+		
+		// Panic to prevent duplicate nodes from running
+		panic(fmt.Sprintf("[Writer Registry] Node with ID %s already exists for chain %s. Existing node info: %s", 
+			wr.nodeID, wr.chainID, existingNode))
 	}
 
 	// Keep lease alive

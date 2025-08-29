@@ -59,6 +59,9 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 	if config.IsBackup == nil && len(config.EtcdEndpoints) == 0 {
 		log.Crit("IsBackup is nil and etcd endpoints is empty, please set IsBackup to true(manual mode) or add etcd endpoints(auto mode)")
 	}
+	if config.IsBackup != nil && len(config.EtcdEndpoints) > 0 {
+		log.Crit("IsBackup is not nil and etcd endpoints is not empty, please set IsBackup to nil(auto mode) or remove etcd endpoints(manual mode)")
+	}
 	if config.NodeID == "" {
 		// 先尝试从环境变量 HOSTNAME 读取
 		if hostname := os.Getenv("HOSTNAME"); hostname != "" {
