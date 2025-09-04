@@ -8,6 +8,8 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
@@ -57,10 +59,10 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		account, _ := snapshot.FullAccount(v)
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
+			Balance:  uint256.MustFromBig(account.Balance),
 			Nonce:    uint64(account.Nonce),
 			CodeHash: common.BytesToHash(account.CodeHash),
 		})
@@ -103,7 +105,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc core.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)

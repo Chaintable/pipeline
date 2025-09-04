@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 
@@ -24,7 +25,7 @@ import (
 // 2. state diff
 // 3. block file
 
-var _ vm.EVMLogger = (*PipelineTracer)(nil)
+var _ vm.Tracer = (*PipelineTracer)(nil)
 
 type PipelineTracer struct {
 	config     PipelineTracerConfig
@@ -112,7 +113,7 @@ func (t *PipelineTracer) CaptureStart(env *vm.EVM, from common.Address, to commo
 	}
 }
 
-func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, _ time.Duration, err error) {
 	if t.callTracer != nil {
 		t.callTracer.CaptureEnd(output, gasUsed, err)
 	}
@@ -130,7 +131,7 @@ func (t *PipelineTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *PipelineTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *PipelineTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.CaptureFault(pc, op, gas, cost, scope, depth, err)
 	}
@@ -162,7 +163,7 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
-func (t *PipelineTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *PipelineTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
 	}
@@ -174,7 +175,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
