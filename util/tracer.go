@@ -11,45 +11,42 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
+func BuildPipelineBlock(rawBlock *ptypes.EvmHeader) ptypes.Block {
 	block := ptypes.Block{
-		ID:                    rawBlock.Hash().Hex(),
-		Height:                rawBlock.Number(),
-		ParentID:              rawBlock.ParentHash().Hex(),
+		ID:                    rawBlock.Hash.Hex(),
+		Height:                rawBlock.Number,
+		ParentID:              rawBlock.ParentHash.Hex(),
 		BaseFeePerGas:         big.NewInt(0),
-		Miner:                 strings.ToLower(rawBlock.Coinbase().Hex()),
-		GasLimit:              big.NewInt(int64(rawBlock.GasLimit())),
-		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
-		Timestamp:             rawBlock.Time(),
+		Miner:                 strings.ToLower(rawBlock.Coinbase.Hex()),
+		GasLimit:              big.NewInt(int64(rawBlock.GasLimit)),
+		GasUsed:               big.NewInt(int64(rawBlock.GasUsed)),
+		Timestamp:             rawBlock.Time,
 		ProcessStartTimestamp: time.Now().UnixMilli(),
 	}
-	if rawBlock.Header().BaseFee != nil {
-		block.BaseFeePerGas = rawBlock.Header().BaseFee
+	if rawBlock.BaseFee != nil {
+		block.BaseFeePerGas = rawBlock.BaseFee
 	}
 	return block
 }
 
-func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
+func BuildPilelineBlockHeader(block *ptypes.EvmHeader) *ptypes.Header {
 	blockHeader := ptypes.Header{
-		Number:           (*hexutil.Big)(block.Number()),
-		Hash:             block.Hash(),
-		ParentHash:       block.ParentHash(),
-		Nonce:            block.Header().Nonce,
-		MixHash:          block.MixDigest(),
-		Sha3Uncles:       block.UncleHash(),
-		LogsBloom:        block.Bloom(),
-		StateRoot:        block.Root(),
-		Miner:            block.Coinbase(),
-		Difficulty:       (*hexutil.Big)(block.Difficulty()),
-		ExtraData:        hexutil.Bytes(block.Extra()),
-		GasLimit:         hexutil.Uint64(block.GasLimit()),
-		GasUsed:          hexutil.Uint64(block.GasUsed()),
-		Timestamp:        hexutil.Uint64(block.Time()),
-		TransactionsRoot: block.TxHash(),
-		ReceiptsRoot:     block.ReceiptHash(),
+		Number:           (*hexutil.Big)(block.Number),
+		Hash:             block.Hash,
+		ParentHash:       block.ParentHash,
+		Nonce:            types.BlockNonce{},
+		MixHash:          common.Hash{},
+		Sha3Uncles:       types.EmptyUncleHash,
+		StateRoot:        block.Root,
+		Miner:            block.Coinbase,
+		Difficulty:       (*hexutil.Big)(common.Big0),
+		GasLimit:         hexutil.Uint64(block.GasLimit),
+		GasUsed:          hexutil.Uint64(block.GasUsed),
+		Timestamp:        hexutil.Uint64(block.Time),
+		TransactionsRoot: block.TxHash,
 	}
-	if block.Header().BaseFee != nil {
-		blockHeader.BaseFeePerGas = (*hexutil.Big)(block.Header().BaseFee)
+	if block.BaseFee != nil {
+		blockHeader.BaseFeePerGas = (*hexutil.Big)(block.BaseFee)
 	}
 	return &blockHeader
 }

@@ -65,10 +65,10 @@ func (t *PipelineTracer) OnClose() {
 	NodeXPusher.Close()
 }
 
-func (t *PipelineTracer) OnBlockStart(block *types.Block) {
+func (t *PipelineTracer) OnBlockStart(block *ptypes.EvmHeader) {
 	BlockCtx = &ExtraInfo{
-		BlockNumber: block.NumberU64(),
-		BlockHash:   block.Hash(),
+		BlockNumber: block.Number.Uint64(),
+		BlockHash:   block.Hash,
 	}
 	BlockCtx.BlockDiff = &ptypes.BlockStorageDiff{}
 	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(block)
@@ -175,7 +175,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *ptypes.EvmHeader, alloc core.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
@@ -186,17 +186,17 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAl
 	if err != nil {
 		log.Crit("Failed to upload block", "err", err)
 	}
-	log.Info("[inner s3] 1.upload genesis block", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+	log.Info("[inner s3] 1.upload genesis block", "block hash", block.Hash.Hex(), "block number", block.Number.Uint64())
 
 	blockDiff := GenesisAllocToStateDiff(alloc)
-	blockDiff.Hash = block.Root()
+	blockDiff.Hash = block.Root
 	// genesis block has no parent
 	blockDiff.ParentHash = types.EmptyRootHash
 	err = uploadBlockDiff(blockDiff)
 	if err != nil {
 		log.Crit("Failed to upload block diff files to s3", "err", err)
 	}
-	log.Info("[inner s3] 2.upload genesis state diff", "block", block.Hash().Hex())
+	log.Info("[inner s3] 2.upload genesis state diff", "block", block.Hash.Hex())
 
 	// 业务s3
 	blockFile := &ptypes.BlockFile{
@@ -232,10 +232,10 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAl
 		ChangeType: 1,
 		NewBlocks: []ptypes.BlockContext{
 			{
-				Hash:        block.Hash(),
-				ParentHash:  block.ParentHash(),
-				BlockNumber: block.NumberU64(),
-				Timestamp:   block.Time(),
+				Hash:        block.Hash,
+				ParentHash:  block.ParentHash,
+				BlockNumber: block.Number.Uint64(),
+				Timestamp:   block.Time,
 			},
 		},
 	}
@@ -245,7 +245,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc core.GenesisAl
 		log.Crit("Failed to push block change notification", "err", err)
 	}
 
-	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+	log.Info("push genesis block change notification", "block hash", block.Hash.Hex(), "block number", block.Number.Uint64())
 }
 
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
