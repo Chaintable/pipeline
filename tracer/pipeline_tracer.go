@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/Chaintable/pipeline/metrics"
 
@@ -249,6 +248,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *ptypes.EvmHeader, alloc core.Gene
 }
 
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
+	BlockCtx.BlockHeader.StateRoot = root
 	if originRoot != root {
 		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
 	} else {
@@ -339,8 +339,4 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
-}
-
-func addressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
