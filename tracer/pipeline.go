@@ -60,7 +60,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		account, _ := types.FullAccount(v)
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
+			Balance:  uint256.MustFromBig(account.Balance),
 			Nonce:    uint64(account.Nonce),
 			CodeHash: common.BytesToHash(account.CodeHash),
 		})

@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/crypto"
-
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -27,20 +25,18 @@ import (
 // 3. block file
 
 type PipelineTracer struct {
-	config         pipelineTracerConfig
-	callTracer     *callTracer
-	prestateTracer *prestateTracer
+	config     pipelineTracerConfig
+	callTracer *callTracer
 }
 
 type pipelineTracerConfig struct {
-	Region               string   `json:"region"`
-	NodeXBucket          string   `json:"node_x_bucket"`
-	ChainTableBucket     string   `json:"chain_table_bucket"`
-	Brokers              []string `json:"brokers"`
-	Topic                string   `json:"topic"`
-	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             bool     `json:"is_backup"`
-	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
+	Region           string   `json:"region"`
+	NodeXBucket      string   `json:"node_x_bucket"`
+	ChainTableBucket string   `json:"chain_table_bucket"`
+	Brokers          []string `json:"brokers"`
+	Topic            string   `json:"topic"`
+	S3TempDir        string   `json:"s3_temp_dir"`
+	IsBackup         bool     `json:"is_backup"`
 }
 
 func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
@@ -93,17 +89,6 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
 	BlockCtx.ChangeContracts = make(map[common.Address]struct{})
-	if t.config.EnablePreStateTracer {
-		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
-			DiffMode: true,
-		})
-	}
-}
-
-func (t *PipelineTracer) OnSystemCallStartHookV2(vm *tracing.VMContext) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnSystemCallStartHookV2(vm)
-	}
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
@@ -132,10 +117,6 @@ func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction,
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
 
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnTxStart(vm, tx, from)
-	}
-
 	BlockCtx.Tx = tx
 	BlockCtx.From = from
 	BlockCtx.TxStartTime = time.Now()
@@ -147,10 +128,6 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}()
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
-
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnTxEnd(receipt, err)
-	}
 
 	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
@@ -171,9 +148,6 @@ func (t *PipelineTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 func (t *PipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
-	}
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
 	}
 }
 
@@ -256,20 +230,9 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 }
 
-func (t *PipelineTracer) OnBlockDBStart(db tracing.StateDB) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnBlockDBStart(db)
-	}
-}
-
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
-		var stateDiff *ptypes.BlockStorageDiff
-		if t.config.EnablePreStateTracer {
-			stateDiff = t.prestateTracer.GetStateDiff(originRoot, root)
-		} else {
-			stateDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
-		}
+		stateDiff := stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
 		BlockCtx.BlockDiff = stateDiff
 	} else {
 		BlockCtx.BlockDiff = nil
@@ -355,14 +318,4 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
-}
-
-func addressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
-}
-
-func (t *PipelineTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnBalanceChange(addr, prev, new, reason)
-	}
 }
