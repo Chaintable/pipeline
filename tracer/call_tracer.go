@@ -44,6 +44,7 @@ type callFrame struct {
 	Output       []byte          `json:"output,omitempty" rlp:"optional"`
 	Error        string          `json:"error,omitempty" rlp:"optional"`
 	RevertReason string          `json:"revertReason,omitempty"`
+	ParentFailed bool            `json:"-"` // Indicates if the parent call failed
 	Calls        []callFrame     `json:"calls,omitempty" rlp:"optional"`
 	Logs         []ptypes.Event  `json:"logs,omitempty" rlp:"optional"`
 
@@ -55,8 +56,7 @@ type callFrame struct {
 
 	// Placed at end on purpose. The RLP will be decoded to 0 instead of
 	// nil if there are non-empty elements after in the struct.
-	Value            *big.Int `json:"value,omitempty" rlp:"optional"`
-	revertedSnapshot bool
+	Value *big.Int `json:"value,omitempty" rlp:"optional"`
 }
 
 func (f callFrame) TypeString() string {
@@ -79,7 +79,6 @@ func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 		return
 	}
 	f.Error = err.Error()
-	f.revertedSnapshot = reverted
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
 		f.To = nil
 	}
@@ -97,25 +96,19 @@ func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 
 type callTracer struct {
 	callstack []callFrame
-	config    callTracerConfig
 	gasLimit  uint64
 	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
 	txID string
+
+	ChangeContracts map[common.Address]struct{}
+	BlockFile       *ptypes.BlockFile
 }
 
-type callTracerConfig struct {
-	OnlyTopCall bool `json:"onlyTopCall"` // If true, call tracer won't collect any subcalls
-	WithLog     bool `json:"withLog"`     // If true, call tracer will collect event logs
-}
-
-func newCallTracerRaw() *callTracer {
-	t := &callTracer{callstack: make([]callFrame, 0, 1), config: callTracerConfig{
-		OnlyTopCall: false,
-		WithLog:     true,
-	}}
+func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
+	t := &callTracer{callstack: make([]callFrame, 0, 1), ChangeContracts: ChangeContracts, BlockFile: BlockFile}
 	return t
 }
 
@@ -141,6 +134,13 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	if f.Value != nil {
 		value = f.Value
 	}
+	err := ""
+	if f.failed() {
+		err = f.Error
+		if f.RevertReason != "" {
+			err = fmt.Sprintf("%s: %s", f.Error, f.RevertReason)
+		}
+	}
 	return ptypes.Trace{
 		ID:                f.TraceID,
 		From:              strings.ToLower(f.From.Hex()),
@@ -159,6 +159,7 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		StorageChange:     f.StorageChange,
 		Subtraces:         int64(len(f.Calls)),
 		TraceAddress:      traceAddress,
+		Error:             err,
 	}
 }
 
@@ -172,9 +173,6 @@ func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tr
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	t.depth = depth
-	if t.config.OnlyTopCall && depth > 0 {
-		return
-	}
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
@@ -201,9 +199,6 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	}
 
 	t.depth = depth - 1
-	if t.config.OnlyTopCall {
-		return
-	}
 
 	size := len(t.callstack)
 	if size <= 1 {
@@ -218,10 +213,8 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	call.processOutput(output, err, reverted)
 	// Nest call into parent.
 	// 忽略失败的调用
-	if !call.failed() {
-		call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
-		t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
-	}
+	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
+	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
 func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
@@ -242,25 +235,21 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
-	clearFailedLogs(&t.callstack[0], false)
-	setStorageChange(&t.callstack[0])
-	if len(t.callstack) == 1 && !t.callstack[0].failed() {
+	setParentFailed(&t.callstack[0], false)
+	setStorageChange(&t.callstack[0], t.ChangeContracts)
+	if len(t.callstack) == 1 {
 		topCall := &t.callstack[0]
 		topCall.TraceID = util.ToHash([]string{t.txID, "", "0"})
-		BlockCtx.BlockFile.Traces = append(BlockCtx.BlockFile.Traces, t.ToTrace(topCall, []int64{}))
+		if topCall.failed() {
+			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(topCall, []int64{}))
+		} else {
+			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(topCall, []int64{}))
+		}
 		t.addTraceAndLog(topCall, []int64{})
 	}
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
-	// Only logs need to be captured via opcode processing
-	if !t.config.WithLog {
-		return
-	}
-	// Avoid processing nested calls when only caring about top call
-	if t.config.OnlyTopCall && t.depth > 0 {
-		return
-	}
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
@@ -276,15 +265,29 @@ func (t *callTracer) OnLog(log *types.Log) {
 		selector = topics[0]
 		remainingTopics = topics[1:]
 	}
+
+	var position int64
+	if len(t.callstack) > 0 {
+		position = int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs))
+	} else {
+		// 对于某些链(例如mantle),这个event发生在所有call之前,直接置为0并添加到最终的event中
+		position = 0
+	}
+
 	l := ptypes.Event{
 		Address:  strings.ToLower(log.Address.Hex()),
 		Selector: selector,
 		Topics:   remainingTopics,
 		Data:     log.Data,
-		Position: int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
+		Position: position,
 		LogIndex: int64(log.Index),
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
+
+	if len(t.callstack) > 0 {
+		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
+	} else {
+		t.BlockFile.Events = append(t.BlockFile.Events, l)
+	}
 }
 
 func (t *callTracer) GetResult() (json.RawMessage, error) {
@@ -297,24 +300,23 @@ func (t *callTracer) Stop(err error) {
 	t.interrupt.Store(true)
 }
 
-// clearFailedLogs clears the logs of a callframe and all its children
-// in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool) {
+// setParentFailed recursively sets the ParentFailed flag for the call frame and all its subcalls.
+func setParentFailed(cf *callFrame, parentFailed bool) {
 	failed := cf.failed() || parentFailed
-	// Clear own logs
-	if failed {
-		cf.Logs = nil
-	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed)
+		cf.Calls[i].ParentFailed = failed
+		setParentFailed(&cf.Calls[i], failed)
 	}
 }
 
-func setStorageChange(cf *callFrame) {
+func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
+	if cf.To != nil && cf.SelfStorageChange {
+		ChangeContracts[*cf.To] = struct{}{}
+	}
 	subCallStorageChange := false
 	for i := range cf.Calls {
-		setStorageChange(&cf.Calls[i])
-		if cf.Calls[i].StorageChange {
+		setStorageChange(&cf.Calls[i], ChangeContracts)
+		if cf.Calls[i].StorageChange && !cf.Calls[i].failed() {
 			subCallStorageChange = true
 		}
 	}
@@ -332,10 +334,19 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 	for i := range cf.Logs {
 		cf.Logs[i].ParentTraceID = cf.TraceID
 		cf.Logs[i].ID = util.ToHash([]string{cf.Logs[i].ParentTraceID, fmt.Sprintf("%d", cf.Logs[i].Position)})
-		BlockCtx.BlockFile.Events = append(BlockCtx.BlockFile.Events, cf.Logs[i])
+		if cf.failed() || cf.ParentFailed {
+			cf.Logs[i].LogIndex = 0
+			t.BlockFile.ErrorEvents = append(t.BlockFile.ErrorEvents, cf.Logs[i])
+		} else {
+			t.BlockFile.Events = append(t.BlockFile.Events, cf.Logs[i])
+		}
 	}
 	for i := range cf.Calls {
-		BlockCtx.BlockFile.Traces = append(BlockCtx.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
+		if cf.failed() || cf.ParentFailed {
+			t.BlockFile.ErrorTraces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
+		} else {
+			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
+		}
 	}
 }
 

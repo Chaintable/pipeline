@@ -3,11 +3,13 @@ package tracer
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/holiman/uint256"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
 
 	"github.com/Chaintable/pipeline/metrics"
 
@@ -88,6 +90,7 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.From = common.Address{}
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
+	BlockCtx.ChangeContracts = make(map[common.Address]struct{})
 
 	if t.config.EnableStateDiff {
 		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
@@ -118,7 +121,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
-	callTracer := newCallTracerRaw()
+	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
 
@@ -327,6 +330,9 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		BlockCtx.BlockDiff = nil
 	}
 
+	for addr := range BlockCtx.ChangeContracts {
+		BlockCtx.BlockFile.StorageContracts = append(BlockCtx.BlockFile.StorageContracts, strings.ToLower(addr.Hex()))
+	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var uploadErrs []error
