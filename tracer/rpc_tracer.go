@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
 
@@ -39,7 +40,7 @@ func (t *RPCTracer) GetResult() (json.RawMessage, error) {
 	return nil, nil
 }
 
-func (t *RPCTracer) OnBlockStart(block *types.Block) {
+func (t *RPCTracer) OnBlockStart(block *types.Block, chainConfig *params.ChainConfig) {
 	t.currentBlock = &RPCBlockContext{
 		ChangeContracts: make(map[common.Address]struct{}),
 	}
@@ -56,7 +57,7 @@ func (t *RPCTracer) OnBlockStart(block *types.Block) {
 	}
 	t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
 		DiffMode: true,
-	})
+	}, chainConfig)
 }
 
 func (t *RPCTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {

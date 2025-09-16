@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
 )
@@ -33,28 +34,33 @@ func (a *account) exists() bool {
 }
 
 type prestateTracer struct {
-	env       *tracing.VMContext
-	pre       stateMap
-	post      stateMap
-	to        common.Address
-	config    prestateTracerConfig
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
-	created   map[common.Address]bool
-	deleted   map[common.Address]bool
+	env         *tracing.VMContext
+	pre         stateMap
+	post        stateMap
+	to          common.Address
+	config      prestateTracerConfig
+	chainConfig *params.ChainConfig
+	interrupt   atomic.Bool // Atomic flag to signal execution interruption
+	reason      error       // Textual reason for the interruption
+	created     map[common.Address]bool
+	deleted     map[common.Address]bool
 }
 
 type prestateTracerConfig struct {
 	DiffMode bool `json:"diffMode"` // If true, this tracer will return state modifications
 }
 
-func newPrestateTracer(config *prestateTracerConfig) *prestateTracer {
+func newPrestateTracer(config *prestateTracerConfig, chainConfig *params.ChainConfig) *prestateTracer {
+	// Diff mode has special semantics around account creating and deletion which
+	// requires it to include empty accounts and storage.
+
 	t := &prestateTracer{
-		pre:     stateMap{},
-		post:    stateMap{},
-		config:  *config,
-		created: make(map[common.Address]bool),
-		deleted: make(map[common.Address]bool),
+		pre:         stateMap{},
+		post:        stateMap{},
+		config:      *config,
+		chainConfig: chainConfig,
+		created:     make(map[common.Address]bool),
+		deleted:     make(map[common.Address]bool),
 	}
 	return t
 }
@@ -85,6 +91,13 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := common.Address(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
+		// Lookup the delegation target
+		if t.chainConfig.IsPrague(t.env.BlockNumber, t.env.Time) {
+			code := t.env.StateDB.GetCode(addr)
+			if target, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(target)
+			}
+		}
 	case op == vm.CREATE:
 		nonce := t.env.StateDB.GetNonce(caller)
 		addr := crypto.CreateAddress(caller, nonce)
@@ -113,11 +126,27 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction
 		t.created[t.to] = true
 	} else {
 		t.to = *tx.To()
+		// Lookup the delegation target
+		if t.chainConfig.IsPrague(t.env.BlockNumber, t.env.Time) {
+			code := t.env.StateDB.GetCode(t.to)
+			if target, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(target)
+			}
+		}
 	}
 
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+
+	// Add accounts with authorizations to the prestate before they get applied.
+	for _, auth := range tx.SetCodeAuthorizations() {
+		addr, err := auth.Authority()
+		if err != nil {
+			continue
+		}
+		t.lookupAccount(addr)
+	}
 }
 
 func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -127,6 +156,7 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if t.config.DiffMode {
 		t.processDiffState()
 	}
+
 	// the new created contracts' prestate were empty, so delete them
 	for a := range t.created {
 		// the created contract maybe exists in statedb before the creating tx

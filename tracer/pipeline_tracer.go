@@ -31,6 +31,7 @@ type PipelineTracer struct {
 	config         pipelineTracerConfig
 	callTracer     *callTracer
 	prestateTracer *prestateTracer
+	chainConfig    *params.ChainConfig
 }
 
 type pipelineTracerConfig struct {
@@ -53,6 +54,7 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 	}
 	t := &PipelineTracer{
 		config: config,
+		//chainConfig: chainConfig,
 	}
 	return t, nil
 }
@@ -95,7 +97,7 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	if t.config.EnableStateDiff {
 		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
 			DiffMode: true,
-		})
+		}, t.chainConfig)
 	}
 }
 
