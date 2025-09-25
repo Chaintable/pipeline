@@ -271,10 +271,6 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	size := len(t.callstack)
-	if size <= 1 {
-		return
-	}
 	topics := make([]string, len(log.Topics))
 	for i, topic := range log.Topics {
 		topics[i] = topic.Hex()
