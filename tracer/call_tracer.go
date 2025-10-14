@@ -232,7 +232,7 @@ func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, fr
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	// Error happened during tx validation.
-	if err != nil {
+	if err != nil || len(t.callstack) == 0 {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
