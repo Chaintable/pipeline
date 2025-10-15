@@ -11,6 +11,7 @@ import (
 
 	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
+	"github.com/ethereum/go-ethereum/core/vm"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -221,6 +222,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
+	log.Info("OnTxStart", "tx", tx.Hash().Hex())
 	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
@@ -231,6 +233,7 @@ func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction,
 }
 
 func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	log.Info("OnTxEnd", "receipt", receipt, "err", err)
 	if err != nil {
 		return
 	}
@@ -245,18 +248,23 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 func (t *PipelineTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, order uint64) {
+	log.Info("OnEnter", "depth", depth)
 	if t.callTracer != nil {
 		t.callTracer.OnEnter(depth, typ, from, to, input, gas, value, order)
 	}
 }
 
 func (t *PipelineTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	log.Info("OnExit", "depth", depth)
 	if t.callTracer != nil {
 		t.callTracer.OnExit(depth, output, gasUsed, err, reverted)
 	}
 }
 
 func (t *PipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	if vm.OpCode(op) == vm.SSTORE {
+		log.Info("OnOpcode", "depth", depth)
+	}
 	if t.callTracer != nil {
 		t.callTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
 	}

@@ -32,7 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 type callFrame struct {
@@ -173,7 +172,6 @@ func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tr
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, _ uint64) {
-	log.Info("OnEnter", "depth", depth)
 	t.depth = depth
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
@@ -195,7 +193,6 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 // OnExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
 func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	log.Info("OnExit", "depth", depth)
 	if depth == 0 {
 		t.captureEnd(output, gasUsed, err, reverted)
 		return
@@ -229,13 +226,11 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 }
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
-	log.Info("OnTxStart", "tx", tx.Hash().Hex())
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
-	log.Info("OnTxEnd", "receipt", receipt, "err", err)
 	// Error happened during tx validation.
 	if err != nil || len(t.callstack) == 0 {
 		return
