@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -186,6 +188,13 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 	for {
 		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
 		if err != nil {
+			var apiErr smithy.APIError
+			if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
+				strings.Contains(err.Error(), "InternalServerError") {
+				log.Printf("HTTP 500 error detected, retrying in 1 second: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
 			if times > 3 {
 				return err
 			}
@@ -209,6 +218,13 @@ func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 			for {
 				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
 				if err != nil {
+					var apiErr smithy.APIError
+					if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
+						strings.Contains(err.Error(), "InternalServerError") {
+						log.Printf("HTTP 500 error detected, retrying in 1 second: %v", err)
+						time.Sleep(time.Second)
+						continue
+					}
 					if times > 3 {
 						lock.Lock()
 						errs = append(errs, err)
