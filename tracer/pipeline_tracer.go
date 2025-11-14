@@ -236,6 +236,10 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 }
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
+	// 兼容engine_newPayloadV4 的 block 没触发 OnBlockStart 的时候
+	if BlockCtx == nil {
+		return
+	}
 	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
