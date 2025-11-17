@@ -254,6 +254,12 @@ func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction,
 }
 
 func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	if BlockCtx == nil {
+		return
+	}
+	if t.callTracer == nil {
+		return
+	}
 	defer func() {
 		metrics.BlockTxExecutionTimer.UpdateSince(BlockCtx.TxStartTime)
 	}()
