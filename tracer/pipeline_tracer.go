@@ -237,9 +237,16 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 
 func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	// 兼容engine_newPayloadV4 的 block 没触发 OnBlockStart 的时候
-	if BlockCtx == nil {
+	// 这里必须检查 blockCtx 的所有关键字段，而不是只检查 BlockCtx 本身
+	if BlockCtx == nil || BlockCtx.BlockFile == nil || BlockCtx.ChangeContracts == nil {
+		log.Warn("Skip OnTxStart due to missing BlockCtx fields (expected in newPayload flow)",
+			"BlockCtxNil", BlockCtx == nil,
+			"BlockFileNil", BlockCtx != nil && BlockCtx.BlockFile == nil,
+			"ChangeContractsNil", BlockCtx != nil && BlockCtx.ChangeContracts == nil,
+		)
 		return
 	}
+
 	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(vm, tx, from)
