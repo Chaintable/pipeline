@@ -38,11 +38,12 @@ var (
 	ChainTableBucketPusher *processor.PushProcessor
 	BlockCtx               *ExtraInfo
 	BizChainID             string
+	Version                string
 	LeaderManager          *leader.Manager
 	WriterRegistry         *writer.WriterRegistry
 )
 
-func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string) (err error) {
+func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, version string, s3TmpDir string) (err error) {
 	// Create processors
 	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir)
 	if err != nil {
@@ -54,6 +55,7 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	}
 
 	BizChainID = bizChainID
+	Version = version
 	return nil
 }
 
@@ -68,7 +70,7 @@ type WriterRegistryConfig struct {
 }
 
 // SetupLeaderElection sets up manual leader election for the processors
-func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int, writerConfig *WriterRegistryConfig) error {
+func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, version string, isBackup *bool, gracePeriod int, writerConfig *WriterRegistryConfig) error {
 	// Create a single leader manager for both processors
 	config := leader.ManagerConfig{
 		EtcdEndpoints: etcdEndpoints,
@@ -116,7 +118,7 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 			Topic:            writerConfig.Topic,
 		}
 
-		WriterRegistry = writer.NewWriterRegistry(etcdClient, BizChainID, nodeID, nodeInfo, writerConfig.TTL)
+		WriterRegistry = writer.NewWriterRegistry(etcdClient, BizChainID, nodeID, version, nodeInfo, writerConfig.TTL)
 
 		// Register node immediately when initialized (not waiting to become leader)
 		if err := WriterRegistry.RegisterNode(); err != nil {
@@ -230,7 +232,7 @@ func uploadBlockHeader(blockHeader *ptypes.Header) error {
 	defer func() {
 		metrics.BlockHeaderUploadTimer.UpdateSince(start)
 	}()
-	s3BlockFile, err := processor.SerializeHeader(BizChainID, blockHeader)
+	s3BlockFile, err := processor.SerializeHeader(BizChainID, Version, blockHeader)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block header: %v", err)
 	}
@@ -246,7 +248,7 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 	defer func() {
 		metrics.StateDiffUploadTimer.UpdateSince(start)
 	}()
-	s3file, err := processor.SerializeStateDiff(BizChainID, blockDiff)
+	s3file, err := processor.SerializeStateDiff(BizChainID, Version, blockDiff)
 	if err != nil {
 		return fmt.Errorf("failed to serialize state diff: %v", err)
 	}
@@ -258,7 +260,7 @@ func uploadBlockDiff(blockDiff *ptypes.BlockStorageDiff) error {
 }
 
 func uploadBlockFile(blockFile *ptypes.BlockFile) error {
-	s3file, err := processor.SerializeFile(BizChainID, blockFile)
+	s3file, err := processor.SerializeFile(BizChainID, Version, blockFile)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file: %v", err)
 	}
@@ -274,7 +276,7 @@ func uploadblockFileValidation(blockFile *ptypes.BlockFile) error {
 	defer func() {
 		metrics.BlockFileValidationTimer.UpdateSince(start)
 	}()
-	blockFileValidation, err := processor.SerializeFileValidation(BizChainID, blockFile)
+	blockFileValidation, err := processor.SerializeFileValidation(BizChainID, Version, blockFile)
 	if err != nil {
 		return fmt.Errorf("failed to serialize block file validation: %v", err)
 	}
