@@ -44,6 +44,7 @@ type pipelineTracerConfig struct {
 	S3TempDir            string   `json:"s3_temp_dir"`
 	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
 	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
+	Version              string   `json:"version"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
@@ -106,12 +107,24 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 
 	// set default election key
 	if t.config.ElectionKey == "" {
-		t.config.ElectionKey = chainConfig.ChainID.String() + "/writers/leader"
+		if t.config.Version == "" {
+			t.config.ElectionKey = fmt.Sprintf("%s/writers/leader", chainConfig.ChainID.String())
+		} else {
+			t.config.ElectionKey = fmt.Sprintf("%s/%s/writers/leader", chainConfig.ChainID.String(), t.config.Version)
+		}
+	}
+
+	if t.config.Topic == "" {
+		if t.config.Version == "" {
+			t.config.Topic = fmt.Sprintf("nodex_pipeline_%d", chainConfig.ChainID)
+		} else {
+			t.config.Topic = fmt.Sprintf("nodex_pipeline_%d_%s", chainConfig.ChainID, t.config.Version)
+		}
 	}
 
 	// Initialize pipeline
 	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket,
-		t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(),
+		t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.Version,
 		t.config.S3TempDir)
 
 	if err != nil {
@@ -134,7 +147,7 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 
 	// Setup leader election based on configuration
 	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.IsBackup, t.config.GracePeriod, writerConfig)
+		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, writerConfig)
 	if err != nil {
 		log.Crit("Failed to setup leader election", "err", err)
 		// Continue without election - will remain in backup mode
