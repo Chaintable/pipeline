@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 
+	"github.com/XinFinOrg/XDPoSChain/rlp"
 	"github.com/klauspost/compress/gzip"
-
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 func EncodeToJsonGzip(v any) ([]byte, error) {

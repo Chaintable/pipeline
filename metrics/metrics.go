@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/XinFinOrg/XDPoSChain/metrics"
 )
 
 var (

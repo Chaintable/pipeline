@@ -9,11 +9,12 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/writer"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/XinFinOrg/XDPoSChain/common"
+	"github.com/XinFinOrg/XDPoSChain/core/state"
+	"github.com/XinFinOrg/XDPoSChain/core/types"
+	"github.com/XinFinOrg/XDPoSChain/crypto"
+	"github.com/XinFinOrg/XDPoSChain/log"
+	"github.com/XinFinOrg/XDPoSChain/rlp"
 	"github.com/holiman/uint256"
 )
 
@@ -143,10 +144,13 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		var account state.Account
+		if err := rlp.DecodeBytes(v, &account); err != nil {
+			panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
+			Balance:  uint256.MustFromBig(account.Balance),
 			Nonce:    uint64(account.Nonce),
 			CodeHash: common.BytesToHash(account.CodeHash),
 		})
@@ -189,7 +193,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc ptypes.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)

@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/XinFinOrg/XDPoSChain/common"
 )
 
 type BlockChangeNotification struct {

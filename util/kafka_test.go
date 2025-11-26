@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/Chaintable/pipeline/types"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/XinFinOrg/XDPoSChain/common"
 )
 
 func TestKafkaReader(t *testing.T) {

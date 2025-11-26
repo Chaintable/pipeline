@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/XinFinOrg/XDPoSChain/common/hexutil"
 )
 
 // id = to_hash(event['parent_trace_id'], event['pos_in_parent_trace'])
