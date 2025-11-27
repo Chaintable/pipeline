@@ -1,6 +1,6 @@
 module github.com/Chaintable/pipeline
 
-go 1.23.0
+go 1.24.0
 
 require (
 	github.com/XinFinOrg/XDPoSChain v1.6.1-0.20250604090019-fa056d9e633c
@@ -15,7 +15,7 @@ require (
 )
 
 require (
-	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
+	github.com/VictoriaMetrics/fastcache v1.13.2 // indirect
 	github.com/aristanetworks/goarista v0.0.0-20231019142648-8c6f0862ab98 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.6 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.46 // indirect
@@ -52,9 +52,9 @@ require (
 	go.etcd.io/etcd/client/pkg/v3 v3.5.10 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.34.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto v0.0.0-20231002182017-d307bd883b97 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230920204549-e6e6cdab5c13 // indirect
