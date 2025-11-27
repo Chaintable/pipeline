@@ -126,7 +126,7 @@ func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destruct
 	}
 
 	for addr := range t.currentBlock.ChangeContracts {
-		t.currentBlock.BlockFile.StorageContracts = append(t.currentBlock.BlockFile.StorageContracts, strings.ToLower(addr.Hex()))
+		t.currentBlock.BlockFile.StorageContracts = append(t.currentBlock.BlockFile.StorageContracts, strings.ToLower(util.AddressToHex(addr)))
 	}
 
 	// Generate DebankOutPut

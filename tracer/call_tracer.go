@@ -140,10 +140,10 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	}
 	return ptypes.Trace{
 		ID:                f.TraceID,
-		From:              strings.ToLower(f.From.Hex()),
+		From:              strings.ToLower(util.AddressToHex(f.From)),
 		Gas:               big.NewInt(int64(f.Gas)),
 		Input:             (hexutil.Bytes)(f.Input),
-		To:                strings.ToLower(to.Hex()),
+		To:                strings.ToLower(util.AddressToHex(to)),
 		Value:             (*hexutil.Big)(value),
 		GasUsed:           big.NewInt(int64(f.GasUsed)),
 		Output:            (hexutil.Bytes)(f.Output),
@@ -282,7 +282,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 	}
 
 	l := ptypes.Event{
-		Address:  strings.ToLower(log.Address.Hex()),
+		Address:  strings.ToLower(util.AddressToHex(log.Address)),
 		Selector: selector,
 		Topics:   remainingTopics,
 		Data:     log.Data,

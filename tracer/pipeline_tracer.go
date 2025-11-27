@@ -340,7 +340,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 	}
 	for addr, account := range alloc {
 		if len(account.Storage) > 0 {
-			blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(addr.Hex()))
+			blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(util.AddressToHex(addr)))
 		}
 	}
 	// upload block file and meta data
@@ -388,7 +388,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	}
 
 	for addr := range BlockCtx.ChangeContracts {
-		BlockCtx.BlockFile.StorageContracts = append(BlockCtx.BlockFile.StorageContracts, strings.ToLower(addr.Hex()))
+		BlockCtx.BlockFile.StorageContracts = append(BlockCtx.BlockFile.StorageContracts, strings.ToLower(util.AddressToHex(addr)))
 	}
 
 	var wg sync.WaitGroup

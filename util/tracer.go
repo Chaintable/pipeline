@@ -17,7 +17,7 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
 		BaseFeePerGas:         big.NewInt(0),
-		Miner:                 strings.ToLower(addressToHex(rawBlock.Coinbase())),
+		Miner:                 strings.ToLower(AddressToHex(rawBlock.Coinbase())),
 		GasLimit:              big.NewInt(int64(rawBlock.GasLimit())),
 		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
 		Timestamp:             rawBlock.Time().Uint64(),
@@ -56,8 +56,8 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	gasPrice := tx.GasPrice()
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
-		From:             strings.ToLower(addressToHex(from)),
-		To:               strings.ToLower(addressToHex(to)),
+		From:             strings.ToLower(AddressToHex(from)),
+		To:               strings.ToLower(AddressToHex(to)),
 		Gas:              big.NewInt(int64(tx.Gas())),
 		GasPrice:         gasPrice,
 		GasUsed:          big.NewInt(int64(receipt.GasUsed)),
@@ -72,7 +72,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	return transaction
 }
 
-func addressToHex(address common.Address) string {
+func AddressToHex(address common.Address) string {
 	text, _ := address.MarshalText()
 	return string(text)
 }
