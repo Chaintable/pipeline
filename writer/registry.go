@@ -23,6 +23,7 @@ type WriterRegistry struct {
 	client   *clientv3.Client
 	chainID  string
 	nodeID   string
+	version  string
 	nodeInfo WriterNodeInfo
 	lease    clientv3.Lease
 	leaseID  clientv3.LeaseID
@@ -32,13 +33,14 @@ type WriterRegistry struct {
 }
 
 // NewWriterRegistry creates a new WriterRegistry instance
-func NewWriterRegistry(client *clientv3.Client, chainID, nodeID string, nodeInfo WriterNodeInfo, ttl int64) *WriterRegistry {
+func NewWriterRegistry(client *clientv3.Client, chainID, nodeID, version string, nodeInfo WriterNodeInfo, ttl int64) *WriterRegistry {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &WriterRegistry{
 		client:   client,
 		chainID:  chainID,
 		nodeID:   nodeID,
+		version:  version,
 		nodeInfo: nodeInfo,
 		ttl:      ttl,
 		ctx:      ctx,
@@ -73,7 +75,7 @@ func (wr *WriterRegistry) RegisterNode() error {
 
 	txn := wr.client.Txn(wr.ctx)
 	var txnResp *clientv3.TxnResponse
-	
+
 	if len(getResp.Kvs) == 0 {
 		// Key doesn't exist, try to create it
 		txnResp, err = txn.If(
@@ -111,7 +113,7 @@ func (wr *WriterRegistry) RegisterNode() error {
 	if !txnResp.Succeeded {
 		// Node with same ID already exists, revoke our lease and panic
 		wr.lease.Revoke(context.Background(), wr.leaseID)
-		
+
 		// Get existing node info for error message
 		existingNode := ""
 		// Try to get from transaction response first
@@ -125,9 +127,9 @@ func (wr *WriterRegistry) RegisterNode() error {
 		if existingNode == "" && len(getResp.Kvs) > 0 {
 			existingNode = string(getResp.Kvs[0].Value)
 		}
-		
+
 		// Panic to prevent duplicate nodes from running
-		panic(fmt.Sprintf("[Writer Registry] Node with ID %s already exists for chain %s. Existing node info: %s", 
+		panic(fmt.Sprintf("[Writer Registry] Node with ID %s already exists for chain %s. Existing node info: %s",
 			wr.nodeID, wr.chainID, existingNode))
 	}
 
@@ -178,5 +180,9 @@ func (wr *WriterRegistry) processKeepAlive(keepAliveCh <-chan *clientv3.LeaseKee
 }
 
 func (wr *WriterRegistry) getNodeKey() string {
-	return fmt.Sprintf("%s/writers/%s", wr.chainID, wr.nodeID)
+	if wr.version == "" {
+		return fmt.Sprintf("%s/writers/%s", wr.chainID, wr.nodeID)
+	} else {
+		return fmt.Sprintf("%s/%s/writers/%s", wr.chainID, wr.version, wr.nodeID)
+	}
 }
