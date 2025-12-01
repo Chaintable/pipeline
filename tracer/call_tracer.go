@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type callFrame struct {
@@ -57,6 +59,9 @@ type callFrame struct {
 	// Placed at end on purpose. The RLP will be decoded to 0 instead of
 	// nil if there are non-empty elements after in the struct.
 	Value *big.Int `json:"value,omitempty" rlp:"optional"`
+
+	CodeCopyOffset uint64 `json:"code_copy_offset,omitempty"`
+	CodeCopyLength uint64 `json:"code_copy_length,omitempty"`
 }
 
 func (f callFrame) TypeString() string {
@@ -105,10 +110,18 @@ type callTracer struct {
 
 	ChangeContracts map[common.Address]struct{}
 	BlockFile       *ptypes.BlockFile
+	KeccakPreimages map[string]struct{}
+	PreSlotMap      map[common.Address]map[common.Hash]common.Hash
+	stateDB         tracing.StateDB
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
-	t := &callTracer{callstack: make([]callFrame, 0, 1), ChangeContracts: ChangeContracts, BlockFile: BlockFile}
+	t := &callTracer{
+		callstack:       make([]callFrame, 0, 1),
+		ChangeContracts: ChangeContracts,
+		BlockFile:       BlockFile,
+		KeccakPreimages: make(map[string]struct{}),
+		PreSlotMap:      make(map[common.Address]map[common.Hash]common.Hash)}
 	return t
 }
 
@@ -160,13 +173,48 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		Subtraces:         int64(len(f.Calls)),
 		TraceAddress:      traceAddress,
 		Error:             err,
+		CodeCopyOffset:    f.CodeCopyOffset,
+		CodeCopyLength:    f.CodeCopyLength,
 	}
 }
 
 func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	stackData := scope.StackData()
+	stackLen := len(stackData)
 	if vm.OpCode(opcode) == vm.SSTORE {
 		t.callstack[len(t.callstack)-1].SelfStorageChange = true
 		t.callstack[len(t.callstack)-1].StorageChange = true
+		if stackLen >= 1 {
+			caller := scope.Address()
+			slot := common.Hash(stackData[stackLen-1].Bytes32())
+			if _, ok := t.PreSlotMap[caller]; !ok {
+				t.PreSlotMap[caller] = make(map[common.Hash]common.Hash)
+			}
+			if _, ok := t.PreSlotMap[caller][slot]; !ok {
+				prevValue := t.stateDB.GetState(caller, slot)
+				t.PreSlotMap[caller][slot] = prevValue
+			}
+		}
+	}
+	if vm.OpCode(opcode) == vm.KECCAK256 && stackLen >= 2 {
+		dataOffset := stackData[len(stackData)-1].Uint64()
+		dataLength := stackData[len(stackData)-2].Uint64()
+		preimage, err := GetMemoryCopyPadded(scope.MemoryData(), int64(dataOffset), int64(dataLength))
+		if err != nil {
+			log.Warn("callTracer: failed to copy keccak preimage from memory", "err", err)
+		} else {
+			t.KeccakPreimages[string(preimage)] = struct{}{}
+		}
+	}
+	if vm.OpCode(opcode) == vm.CODECOPY && stackLen >= 3 {
+		codeOffset := stackData[len(stackData)-2]
+		length := stackData[len(stackData)-3].Uint64()
+		uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
+		if overflow {
+			uint64CodeOffset = math.MaxUint64
+		}
+		t.callstack[len(t.callstack)-1].CodeCopyOffset = uint64CodeOffset
+		t.callstack[len(t.callstack)-1].CodeCopyLength = length
 	}
 }
 
@@ -226,8 +274,46 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 }
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
+	t.stateDB = env.StateDB
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+}
+
+func (t *callTracer) setPreimages() {
+	preimages := ptypes.Preimages{
+		TxID:      t.txID,
+		Preimages: make([]hexutil.Bytes, 0, len(t.KeccakPreimages)),
+	}
+	for preimage := range t.KeccakPreimages {
+		preimages.Preimages = append(preimages.Preimages, hexutil.Bytes(preimage))
+	}
+	if len(preimages.Preimages) > 0 {
+		t.BlockFile.Preimages = append(t.BlockFile.Preimages, preimages)
+	}
+}
+
+func (t *callTracer) setSlotChange() {
+	slotChanges := ptypes.SlotChanges{
+		TxID:    t.txID,
+		Changes: make(map[common.Address]map[common.Hash]ptypes.SlotChange),
+	}
+	for contract, slots := range t.PreSlotMap {
+		if _, ok := slotChanges.Changes[contract]; !ok {
+			slotChanges.Changes[contract] = make(map[common.Hash]ptypes.SlotChange)
+		}
+		for slot, preValue := range slots {
+			postValue := t.stateDB.GetState(contract, slot)
+			if preValue != postValue {
+				slotChanges.Changes[contract][slot] = ptypes.SlotChange{
+					Pre:  preValue,
+					Post: postValue,
+				}
+			}
+		}
+	}
+	if len(slotChanges.Changes) > 0 {
+		t.BlockFile.SlotChanges = append(t.BlockFile.SlotChanges, slotChanges)
+	}
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -247,6 +333,8 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		}
 		t.addTraceAndLog(topCall, []int64{})
 	}
+	t.setPreimages()
+	t.setSlotChange()
 }
 
 func (t *callTracer) OnLog(log *types.Log) {

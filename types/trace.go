@@ -26,4 +26,6 @@ type Trace struct {
 	Subtraces         int64         `json:"subtraces"`
 	TraceAddress      []int64       `json:"trace_address"`
 	Error             string        `json:"error,omitempty"`
+	CodeCopyOffset    uint64        `json:"code_copy_offset,omitempty"`
+	CodeCopyLength    uint64        `json:"code_copy_length,omitempty"`
 }
