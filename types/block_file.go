@@ -16,6 +16,8 @@ type BlockFile struct {
 	ErrorEvents      []Event       `json:"error_events"`
 	ErrorTraces      []Trace       `json:"error_traces"`
 	StorageContracts []string      `json:"storage_contracts"`
+	Preimages        []Preimages   `json:"preimages"`
+	SlotChanges      []SlotChanges `json:"slot_changes"`
 }
 
 func (bf *BlockFile) Validation() BlockValidation {
