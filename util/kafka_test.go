@@ -25,7 +25,7 @@ func TestKafkaReader(t *testing.T) {
 }
 
 func TestKafkaWriter(t *testing.T) {
-	writer := NewKafkaWriter([]string{"localhost:9092"}, "nodex_pipeline_1_tmp")
+	writer := NewKafkaWriter([]string{"localhost:9092"}, "nodex_pipeline_1116")
 	if writer == nil {
 		t.Error("Failed to create Kafka writer")
 	}
@@ -33,9 +33,9 @@ func TestKafkaWriter(t *testing.T) {
 		ChangeType: 1,
 		NewBlocks: []types.BlockContext{
 			{
-				Hash:        common.HexToHash("0x6976c80455f9f81526a7507114e1efe8e49558887e0aa7318b795853e5fe8ff6"),
-				ParentHash:  common.HexToHash("0x64786bd9fefb480d4f3ed0b3f62b870e69c11bc6dc96c02c2ccc6f308bcb90c2"),
-				BlockNumber: 5711598,
+				Hash:        common.HexToHash("0xb4096855bccea8b559005813d2ecd576e8d5d05e0fc752a1a2129524cd30e823"),
+				ParentHash:  common.HexToHash("0xf65f62dfbf52ece97a0e69403a01b923524a20ac33d06d990e5c600bc47e25ab"),
+				BlockNumber: 19676124,
 				Timestamp:   1527817842,
 			},
 		},
