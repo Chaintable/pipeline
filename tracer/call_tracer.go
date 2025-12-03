@@ -60,8 +60,7 @@ type callFrame struct {
 	// nil if there are non-empty elements after in the struct.
 	Value *big.Int `json:"value,omitempty" rlp:"optional"`
 
-	CodeCopyOffset uint64 `json:"code_copy_offset,omitempty"`
-	CodeCopyLength uint64 `json:"code_copy_length,omitempty"`
+	CodeCopyOps []ptypes.CodeCopyOp `json:"code_copy_ops,omitempty" rlp:"optional"`
 }
 
 func (f callFrame) TypeString() string {
@@ -173,8 +172,7 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		Subtraces:         int64(len(f.Calls)),
 		TraceAddress:      traceAddress,
 		Error:             err,
-		CodeCopyOffset:    f.CodeCopyOffset,
-		CodeCopyLength:    f.CodeCopyLength,
+		CodeCopyOps:       f.CodeCopyOps,
 	}
 }
 
@@ -207,14 +205,18 @@ func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tr
 		}
 	}
 	if vm.OpCode(opcode) == vm.CODECOPY && stackLen >= 3 {
+		memoryOffset := stackData[len(stackData)-1].Uint64()
 		codeOffset := stackData[len(stackData)-2]
 		length := stackData[len(stackData)-3].Uint64()
 		uint64CodeOffset, overflow := codeOffset.Uint64WithOverflow()
 		if overflow {
 			uint64CodeOffset = math.MaxUint64
 		}
-		t.callstack[len(t.callstack)-1].CodeCopyOffset = uint64CodeOffset
-		t.callstack[len(t.callstack)-1].CodeCopyLength = length
+		t.callstack[len(t.callstack)-1].CodeCopyOps = append(t.callstack[len(t.callstack)-1].CodeCopyOps, ptypes.CodeCopyOp{
+			CodeCopyDestOffset: memoryOffset,
+			CodeCopyOffset:     uint64CodeOffset,
+			CodeCopyLength:     length,
+		})
 	}
 }
 

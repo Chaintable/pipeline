@@ -27,7 +27,5 @@ type Trace struct {
 	TraceAddress      []int64       `json:"trace_address"`
 	Error             string        `json:"error,omitempty"`
 
-	CodeCopyDestOffset uint64 `json:"code_copy_dest_offset,omitempty"`
-	CodeCopyOffset     uint64 `json:"code_copy_offset,omitempty"`
-	CodeCopyLength     uint64 `json:"code_copy_length,omitempty"`
+	CodeCopyOps []CodeCopyOp `json:"code_copy_ops,omitempty"`
 }
