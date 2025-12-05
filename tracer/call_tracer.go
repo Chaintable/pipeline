@@ -310,7 +310,7 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 }
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
-	if cf.To != nil && cf.SelfStorageChange {
+	if cf.To != nil && cf.SelfStorageChange && !cf.failed() && !cf.ParentFailed {
 		if cf.Type == vm.DELEGATECALL || cf.Type == vm.EXTDELEGATECALL {
 			ChangeContracts[cf.From] = struct{}{}
 		} else {
@@ -320,7 +320,7 @@ func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}
 	subCallStorageChange := false
 	for i := range cf.Calls {
 		setStorageChange(&cf.Calls[i], ChangeContracts)
-		if cf.Calls[i].StorageChange && !cf.Calls[i].failed() {
+		if cf.Calls[i].StorageChange && !cf.Calls[i].failed() && !cf.Calls[i].ParentFailed {
 			subCallStorageChange = true
 		}
 	}
