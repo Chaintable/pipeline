@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/celo-org/celo-blockchain/metrics"
 )
 
 var (

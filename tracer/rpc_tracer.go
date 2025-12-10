@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"math/big"
 	"strings"
+	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/tracing"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/celo-org/celo-blockchain/common"
+	"github.com/celo-org/celo-blockchain/common/hexutil"
+	"github.com/celo-org/celo-blockchain/core/types"
+	"github.com/celo-org/celo-blockchain/core/vm"
+	"github.com/celo-org/celo-blockchain/log"
 )
 
 type RPCTracer struct {
@@ -53,28 +54,46 @@ func (t *RPCTracer) OnBlockStart(block *types.Block) {
 	}
 }
 
-func (t *RPCTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *RPCTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	if t.callTracer != nil {
-		t.callTracer.OnEnter(depth, typ, from, to, input, gas, value)
+		t.callTracer.CaptureStart(env, from, to, create, input, gas, value)
 	}
 }
 
-func (t *RPCTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *RPCTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	if t.callTracer != nil {
-		t.callTracer.OnExit(depth, output, gasUsed, err, reverted)
+		t.callTracer.CaptureEnter(typ, from, to, input, gas, value)
 	}
 }
 
-func (t *RPCTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *RPCTracer) CaptureEnd(output []byte, gasUsed uint64, ti time.Duration, err error) {
 	if t.callTracer != nil {
-		t.callTracer.OnOpcode(pc, opcode, gas, cost, scope, rData, depth, err)
+		t.callTracer.CaptureEnd(output, gasUsed, ti, err)
 	}
 }
 
-func (t *RPCTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
+func (t *RPCTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureExit(output, gasUsed, err)
+	}
+}
+
+func (t *RPCTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
+	}
+}
+
+func (t *RPCTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureFault(pc, op, gas, cost, scope, depth, err)
+	}
+}
+
+func (t *RPCTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	callTracer := newCallTracerRaw(t.currentBlock.ChangeContracts, t.currentBlock.BlockFile)
 	t.callTracer = callTracer
-	t.callTracer.OnTxStart(env, tx, from)
+	t.callTracer.OnTxStart(tx, from)
 	t.currentBlock.From = from
 	t.currentBlock.Tx = tx
 }
