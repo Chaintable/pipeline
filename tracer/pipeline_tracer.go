@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -337,17 +339,139 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		ErrorTraces:      make([]ptypes.Trace, 0),
 		StorageContracts: make([]string, 0),
 	}
-	for addr, account := range alloc {
+
+	// 构造 genesis tx 和 trace
+	zeroAddr := "0x0000000000000000000000000000000000000000"
+	txIdx := int64(0)
+
+	// 对地址排序，确保遍历顺序确定性
+	sortedAddrs := make([]common.Address, 0, len(alloc))
+	for addr := range alloc {
+		sortedAddrs = append(sortedAddrs, addr)
+	}
+	sort.Slice(sortedAddrs, func(i, j int) bool {
+		return sortedAddrs[i].Hex() < sortedAddrs[j].Hex()
+	})
+
+	for _, addr := range sortedAddrs {
+		account := alloc[addr]
+		addrLower := strings.ToLower(addr.Hex())
+
+		// 处理有 Storage 的账户
 		if len(account.Storage) > 0 {
-			blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(addr.Hex()))
+			blockFile.StorageContracts = append(blockFile.StorageContracts, addrLower)
+		}
+
+		// 处理有 balance 的账户 - 构造转账 tx 和 call trace
+		if account.Balance != nil && account.Balance.Sign() > 0 {
+			// tx id: 0xgenesis01 + 13个0 + 地址(42字符) = 66字符
+			txID := fmt.Sprintf("0xgenesis01%013d%s", 0, addrLower)
+
+			// 构造 transfer(address,uint256) 的 ABI 编码 input
+			// 函数选择器: 0xa9059cbb = keccak256("transfer(address,uint256)")[:4]
+			// 参数: address _to (32字节) + uint256 _value (32字节)
+			transferInput := make([]byte, 4+32+32)
+			copy(transferInput[0:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) // transfer 函数选择器
+			copy(transferInput[4+12:4+32], addr.Bytes())             // address 参数 (左边补0到32字节)
+			account.Balance.FillBytes(transferInput[4+32:])          // uint256 参数
+
+			tx := ptypes.Transaction{
+				ID:               txID,
+				From:             zeroAddr,
+				To:               addrLower,
+				Gas:              big.NewInt(0),
+				GasPrice:         big.NewInt(0),
+				GasUsed:          big.NewInt(0),
+				Status:           true,
+				GasFeeCap:        big.NewInt(0),
+				GasTipCap:        big.NewInt(0),
+				Input:            transferInput,
+				Nonce:            big.NewInt(0),
+				TransactionIndex: txIdx,
+				Value:            (*hexutil.Big)(account.Balance),
+			}
+			blockFile.Txs = append(blockFile.Txs, tx)
+
+			// trace id = hash(tx_id, parent_trace_id, pos_in_parent_trace)
+			traceID := util.ToHash([]string{txID, "", "0"})
+			trace := ptypes.Trace{
+				ID:                traceID,
+				From:              zeroAddr,
+				Gas:               big.NewInt(0),
+				Input:             transferInput,
+				To:                addrLower,
+				Value:             (*hexutil.Big)(account.Balance),
+				GasUsed:           big.NewInt(0),
+				Output:            []byte{},
+				CallCreateType:    "call",
+				CallType:          "call",
+				TxID:              txID,
+				ParentTraceID:     "",
+				PosInParentTrace:  0,
+				SelfStorageChange: true,
+				StorageChange:     true,
+				Subtraces:         0,
+				TraceAddress:      []int64{},
+			}
+			blockFile.Traces = append(blockFile.Traces, trace)
+			txIdx++
+		}
+
+		// 处理有 code 的账户 - 构造 create tx 和 create trace
+		if len(account.Code) > 0 {
+			// tx id: 0xgenesis02 + 13个0 + 地址(42字符) = 66字符
+			txID := fmt.Sprintf("0xgenesis02%013d%s", 0, addrLower)
+
+			tx := ptypes.Transaction{
+				ID:               txID,
+				From:             zeroAddr,
+				To:               addrLower,
+				Gas:              big.NewInt(0),
+				GasPrice:         big.NewInt(0),
+				GasUsed:          big.NewInt(0),
+				Status:           true,
+				GasFeeCap:        big.NewInt(0),
+				GasTipCap:        big.NewInt(0),
+				Input:            account.Code,
+				Nonce:            big.NewInt(0),
+				TransactionIndex: txIdx,
+				Value:            (*hexutil.Big)(big.NewInt(0)),
+			}
+			blockFile.Txs = append(blockFile.Txs, tx)
+
+			// trace id = hash(tx_id, parent_trace_id, pos_in_parent_trace)
+			traceID := util.ToHash([]string{txID, "", "0"})
+			trace := ptypes.Trace{
+				ID:                traceID,
+				From:              zeroAddr,
+				Gas:               big.NewInt(0),
+				Input:             account.Code,
+				To:                addrLower,
+				Value:             (*hexutil.Big)(big.NewInt(0)),
+				GasUsed:           big.NewInt(0),
+				Output:            account.Code, // output 直接使用 input (code)
+				CallCreateType:    "create",
+				CallType:          "",
+				TxID:              txID,
+				ParentTraceID:     "",
+				PosInParentTrace:  0,
+				SelfStorageChange: false,
+				StorageChange:     false,
+				Subtraces:         0,
+				TraceAddress:      []int64{},
+			}
+			blockFile.Traces = append(blockFile.Traces, trace)
+			txIdx++
 		}
 	}
+
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
 	if err != nil {
 		log.Crit("Failed to upload block files to s3", "err", err)
 	}
-	log.Info("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
+	log.Info("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64(),
+		"txs", len(blockFile.Txs), "traces", len(blockFile.Traces))
 
 	// upload block file validation
 	err = uploadblockFileValidation(blockFile)
