@@ -367,14 +367,6 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 			// tx id: 0xgenesis01 + 13个0 + 地址(42字符) = 66字符
 			txID := fmt.Sprintf("0xgenesis01%013d%s", 0, addrLower)
 
-			// 构造 transfer(address,uint256) 的 ABI 编码 input
-			// 函数选择器: 0xa9059cbb = keccak256("transfer(address,uint256)")[:4]
-			// 参数: address _to (32字节) + uint256 _value (32字节)
-			transferInput := make([]byte, 4+32+32)
-			copy(transferInput[0:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) // transfer 函数选择器
-			copy(transferInput[4+12:4+32], addr.Bytes())             // address 参数 (左边补0到32字节)
-			account.Balance.FillBytes(transferInput[4+32:])          // uint256 参数
-
 			tx := ptypes.Transaction{
 				ID:               txID,
 				From:             zeroAddr,
@@ -385,7 +377,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 				Status:           true,
 				GasFeeCap:        big.NewInt(0),
 				GasTipCap:        big.NewInt(0),
-				Input:            transferInput,
+				Input:            []byte{},
 				Nonce:            big.NewInt(0),
 				TransactionIndex: txIdx,
 				Value:            (*hexutil.Big)(account.Balance),
@@ -398,7 +390,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 				ID:                traceID,
 				From:              zeroAddr,
 				Gas:               big.NewInt(0),
-				Input:             transferInput,
+				Input:             []byte{},
 				To:                addrLower,
 				Value:             (*hexutil.Big)(account.Balance),
 				GasUsed:           big.NewInt(0),
@@ -408,8 +400,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 				TxID:              txID,
 				ParentTraceID:     "",
 				PosInParentTrace:  0,
-				SelfStorageChange: true,
-				StorageChange:     true,
+				SelfStorageChange: false,
+				StorageChange:     false,
 				Subtraces:         0,
 				TraceAddress:      []int64{},
 			}
