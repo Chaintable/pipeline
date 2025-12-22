@@ -9,6 +9,7 @@ import (
 	"github.com/kaiachain/kaia/blockchain/types"
 	"github.com/kaiachain/kaia/common"
 	"github.com/kaiachain/kaia/common/hexutil"
+	"github.com/kaiachain/kaia/params"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -17,10 +18,10 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
 		BaseFeePerGas:         big.NewInt(0),
-		Miner:                 strings.ToLower(rawBlock.Coinbase().Hex()),
-		GasLimit:              big.NewInt(int64(rawBlock.GasLimit())),
+		Miner:                 strings.ToLower(rawBlock.Rewardbase().Hex()),
+		GasLimit:              big.NewInt(int64(params.UpperGasLimit)),
 		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
-		Timestamp:             rawBlock.Time(),
+		Timestamp:             rawBlock.Header().Time.Uint64(),
 		ProcessStartTimestamp: time.Now().UnixMilli(),
 	}
 	return block
@@ -31,17 +32,17 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 		Number:           (*hexutil.Big)(block.Number()),
 		Hash:             block.Hash(),
 		ParentHash:       block.ParentHash(),
-		Nonce:            block.Header().Nonce,
-		MixHash:          block.MixDigest(),
-		Sha3Uncles:       block.UncleHash(),
+		Nonce:            [8]byte{}, // always the empty nonce for klay
+		MixHash:          common.Hash(block.Header().MixHash),
+		Sha3Uncles:       common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"), // always the empty hash for klay
 		LogsBloom:        block.Bloom(),
 		StateRoot:        block.Root(),
-		Miner:            block.Coinbase(),
-		Difficulty:       (*hexutil.Big)(block.Difficulty()),
+		Miner:            block.Rewardbase(),
+		Difficulty:       (*hexutil.Big)(block.Header().BlockScore),
 		ExtraData:        hexutil.Bytes(block.Extra()),
-		GasLimit:         hexutil.Uint64(block.GasLimit()),
+		GasLimit:         hexutil.Uint64(params.UpperGasLimit),
 		GasUsed:          hexutil.Uint64(block.GasUsed()),
-		Timestamp:        hexutil.Uint64(block.Time()),
+		Timestamp:        hexutil.Uint64(block.Header().Time.Uint64()),
 		TransactionsRoot: block.TxHash(),
 		ReceiptsRoot:     block.ReceiptHash(),
 	}
@@ -54,12 +55,6 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		to = *tx.To()
 	}
 	gasPrice := tx.GasPrice()
-	if receipt.L1Fee != nil {
-		gasUsed := big.NewInt(int64(receipt.GasUsed))
-		l2Fee := big.NewInt(0).Mul(gasPrice, gasUsed)
-		allFee := big.NewInt(0).Add(l2Fee, receipt.L1Fee)
-		gasPrice = big.NewInt(0).Div(allFee, big.NewInt(int64(receipt.GasUsed)))
-	}
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
 		From:             strings.ToLower(from.Hex()),
@@ -72,7 +67,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		GasTipCap:        common.Big0,
 		Input:            tx.Data(),
 		Nonce:            big.NewInt(int64(tx.Nonce())),
-		TransactionIndex: int64(receipt.TransactionIndex),
+		TransactionIndex: int64(0), // TODO, 0 for now
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
 	return transaction

@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/kaiachain/kaia/metrics"
+	"github.com/rcrowley/go-metrics"
 )
 
 var (
@@ -11,17 +11,17 @@ var (
 
 	LatestUploadedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_uploaded_block_number", nil)
 
-	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
+	BlockProcessTimer = metrics.NewRegisteredTimer("pipeline/block_process", nil)
 
-	BlockTxExecutionTimer = metrics.NewRegisteredResettingTimer("pipeline/tx_execution", nil)
+	BlockTxExecutionTimer = metrics.NewRegisteredTimer("pipeline/tx_execution", nil)
 
-	BlockHeaderUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_header_upload", nil)
+	BlockHeaderUploadTimer = metrics.NewRegisteredTimer("pipeline/block_header_upload", nil)
 
-	StateDiffUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/state_diff_upload", nil)
+	StateDiffUploadTimer = metrics.NewRegisteredTimer("pipeline/state_diff_upload", nil)
 
-	BlockFileUploadTimer = metrics.NewRegisteredResettingTimer("pipeline/block_file_upload", nil)
+	BlockFileUploadTimer = metrics.NewRegisteredTimer("pipeline/block_file_upload", nil)
 
-	BlockFileValidationTimer = metrics.NewRegisteredResettingTimer("pipeline/block_file_validation", nil)
+	BlockFileValidationTimer = metrics.NewRegisteredTimer("pipeline/block_file_validation", nil)
 
-	BlockPushTimer = metrics.NewRegisteredResettingTimer("pipeline/block_push", nil)
+	BlockPushTimer = metrics.NewRegisteredTimer("pipeline/block_push", nil)
 )

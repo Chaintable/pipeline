@@ -2,7 +2,6 @@ package types
 
 import (
 	"github.com/holiman/uint256"
-	"github.com/kaiachain/kaia/api"
 	"github.com/kaiachain/kaia/blockchain/types"
 	"github.com/kaiachain/kaia/common"
 	"github.com/kaiachain/kaia/common/hexutil"
@@ -39,11 +38,13 @@ type BlockStorageDiff struct {
 	NewCodes        []NewCode
 }
 
+type BlockNonce [8]byte
+
 type Header struct {
 	Number                *hexutil.Big    `json:"number"`
 	Hash                  common.Hash     `json:"hash"`
 	ParentHash            common.Hash     `json:"parentHash"`
-	Nonce                 api.BlockNonce  `json:"nonce"`
+	Nonce                 BlockNonce      `json:"nonce"`
 	MixHash               common.Hash     `json:"mixHash"`
 	Sha3Uncles            common.Hash     `json:"sha3Uncles"`
 	LogsBloom             types.Bloom     `json:"logsBloom"`
