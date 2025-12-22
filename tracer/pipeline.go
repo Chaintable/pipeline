@@ -9,6 +9,7 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/holiman/uint256"
+	"github.com/kaiachain/kaia/blockchain"
 	"github.com/kaiachain/kaia/blockchain/types"
 	"github.com/kaiachain/kaia/blockchain/types/account"
 	"github.com/kaiachain/kaia/common"
@@ -107,7 +108,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc ptypes.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc blockchain.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)
