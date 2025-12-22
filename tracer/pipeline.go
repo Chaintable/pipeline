@@ -2,18 +2,18 @@ package tracer
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/core/state"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
-	"github.com/MetisProtocol/mvm/l2geth/crypto"
-	"github.com/MetisProtocol/mvm/l2geth/log"
-	"github.com/MetisProtocol/mvm/l2geth/rlp"
 	"github.com/holiman/uint256"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/blockchain/types/account"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/crypto"
+	"github.com/kaiachain/kaia/rlp"
 )
 
 type ExtraInfo struct {
@@ -58,7 +58,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		var account state.Account
+		var account account.LegacyAccount
 		if err := rlp.DecodeBytes(v, &account); err != nil {
 			panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
 		}
@@ -76,7 +76,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 			if len(v) > 0 {
 				_, content, _, err := rlp.Split(v)
 				if err != nil {
-					log.Error("Failed to split storage", "err", err)
+					log.Println("Failed to split storage", "err", err)
 				}
 				value = uint256.NewInt(0).SetBytes(content)
 			}

@@ -1,15 +1,14 @@
 package tracer
 
 import (
+	"log"
 	"math/big"
 	"strings"
-	"time"
 
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
-	"github.com/MetisProtocol/mvm/l2geth/core/vm"
-	"github.com/MetisProtocol/mvm/l2geth/log"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/blockchain/vm"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/common/hexutil"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -52,18 +51,16 @@ func (t *LocalTracer) OnBlockStart(block *types.Block) {
 	}
 }
 
-func (t *LocalTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (t *LocalTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureStart(from, to, create, input, gas, value)
+		t.callTracer.CaptureStart(env, from, to, create, input, gas, value)
 	}
-	return nil
 }
 
-func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
+func (t *LocalTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureEnd(output, gasUsed, tm, err)
+		t.callTracer.CaptureEnd(output, gasUsed, err)
 	}
-	return nil
 }
 
 func (t *LocalTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -78,11 +75,10 @@ func (t *LocalTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *LocalTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (t *LocalTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureFault(env, pc, op, gas, cost, memory, stack, contract, depth, err)
+		t.callTracer.CaptureFault(env, pc, op, gas, cost, ccLeft, ccOpcode, scope, depth, err)
 	}
-	return nil
 }
 
 func (t *LocalTracer) CaptureTxStart(gas uint64) {
@@ -107,11 +103,10 @@ func (t *LocalTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.currentBlock.BlockFile.Txs = append(t.currentBlock.BlockFile.Txs, tx)
 }
 
-func (t *LocalTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (t *LocalTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureState(env, pc, op, gas, cost, memory, stack, contract, depth, err)
+		t.callTracer.CaptureState(env, pc, op, gas, cost, ccLeft, ccOpcode, scope, depth, err)
 	}
-	return nil
 }
 
 func (t *LocalTracer) OnLog(log *types.Log) {
@@ -137,7 +132,7 @@ func (t *LocalTracer) OutPut(originRoot common.Hash, root common.Hash, destructs
 	if t.currentBlock.BlockDiff != nil {
 		stateDiffBytes, err = util.EncodeToRlp(t.currentBlock.BlockDiff)
 		if err != nil {
-			log.Error("Failed to encode state diff", "err", err)
+			log.Println("Failed to encode state diff", "err", err)
 			stateDiffBytes = []byte{}
 		}
 	} else {

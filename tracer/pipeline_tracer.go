@@ -3,22 +3,22 @@ package tracer
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/MetisProtocol/mvm/l2geth/crypto"
+	"github.com/kaiachain/kaia/crypto"
 
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
-	"github.com/MetisProtocol/mvm/l2geth/core/vm"
-	"github.com/MetisProtocol/mvm/l2geth/log"
-	"github.com/MetisProtocol/mvm/l2geth/params"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/blockchain/vm"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/params"
 )
 
 // 需要上传3种data
@@ -58,10 +58,10 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 }
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
-	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
+	log.Println("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
 	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.S3TempDir, t.config.IsBackup)
 	if err != nil {
-		log.Crit("Failed to init pipeline", "err", err)
+		log.Panicln("Failed to init pipeline", "err", err)
 	}
 }
 
@@ -103,26 +103,24 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 		start := time.Now()
 		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
 		if err == nil {
-			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
+			log.Println("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
-			log.Error("Failed to push kafka", "err", err, "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks)
+			log.Println("Failed to push kafka", "err", err, "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks)
 		}
 	}
 	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
 }
 
-func (t *PipelineTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (t *PipelineTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureStart(from, to, create, input, gas, value)
+		t.callTracer.CaptureStart(env, from, to, create, input, gas, value)
 	}
-	return nil
 }
 
-func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
+func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureEnd(output, gasUsed, tm, err)
+		t.callTracer.CaptureEnd(output, gasUsed, err)
 	}
-	return nil
 }
 
 func (t *PipelineTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -137,11 +135,10 @@ func (t *PipelineTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
-func (t *PipelineTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (t *PipelineTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureFault(env, pc, op, gas, cost, memory, stack, contract, depth, err)
+		t.callTracer.CaptureFault(env, pc, op, gas, cost, ccLeft, ccOpcode, scope, depth, err)
 	}
-	return nil
 }
 
 func (t *PipelineTracer) CaptureTxStart(gas uint64) {
@@ -170,11 +167,10 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
-func (t *PipelineTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (t *PipelineTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if t.callTracer != nil {
-		return t.callTracer.CaptureState(env, pc, op, gas, cost, memory, stack, contract, depth, err)
+		t.callTracer.CaptureState(env, pc, op, gas, cost, ccLeft, ccOpcode, scope, depth, err)
 	}
-	return nil
 }
 
 func (t *PipelineTracer) OnLog(log *types.Log) {
@@ -192,9 +188,9 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 	header := util.BuildPilelineBlockHeader(block)
 	err := uploadBlockHeader(header)
 	if err != nil {
-		log.Crit("Failed to upload block", "err", err)
+		log.Panicln("Failed to upload block", "err", err)
 	}
-	log.Info("[inner s3] 1.upload genesis block", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+	log.Println("[inner s3] 1.upload genesis block", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 
 	blockDiff := GenesisAllocToStateDiff(alloc)
 	blockDiff.Hash = block.Root()
@@ -202,9 +198,9 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 	blockDiff.ParentHash = types.EmptyRootHash
 	err = uploadBlockDiff(blockDiff)
 	if err != nil {
-		log.Crit("Failed to upload block diff files to s3", "err", err)
+		log.Panicln("Failed to upload block diff files to s3", "err", err)
 	}
-	log.Info("[inner s3] 2.upload genesis state diff", "block", block.Hash().Hex())
+	log.Println("[inner s3] 2.upload genesis state diff", "block", block.Hash().Hex())
 
 	// 业务s3
 	blockFile := &ptypes.BlockFile{
@@ -224,16 +220,16 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
 	if err != nil {
-		log.Crit("Failed to upload block files to s3", "err", err)
+		log.Panicln("Failed to upload block files to s3", "err", err)
 	}
-	log.Info("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
+	log.Println("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
 
 	// upload block file validation
 	err = uploadblockFileValidation(blockFile)
 	if err != nil {
-		log.Crit("Failed to upload file validation to s3", "err", err)
+		log.Panicln("Failed to upload file validation to s3", "err", err)
 	}
-	log.Info("4.upload block file validation", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
+	log.Println("4.upload block file validation", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
 
 	// push block change notification
 	blockChanges := &ptypes.BlockChangeNotification{
@@ -243,17 +239,17 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 				Hash:        block.Hash(),
 				ParentHash:  block.ParentHash(),
 				BlockNumber: block.NumberU64(),
-				Timestamp:   block.Time(),
+				Timestamp:   block.Time().Uint64(),
 			},
 		},
 	}
 
 	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
 	if err != nil {
-		log.Crit("Failed to push block change notification", "err", err)
+		log.Panicln("Failed to push block change notification", "err", err)
 	}
 
-	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+	log.Println("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 }
 
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
@@ -331,17 +327,17 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Wait()
 
 	if t.config.IsBackup {
-		log.Info("Backup Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
+		log.Println("Backup Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
 	} else {
-		log.Info("Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
+		log.Println("Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
 	}
 
 	// 检查是否有错误
 	if len(uploadErrs) > 0 {
 		for _, err := range uploadErrs {
-			log.Error("Upload error", "err", err)
+			log.Println("Upload error", "err", err)
 		}
-		log.Crit("One or more uploads failed")
+		log.Println("One or more uploads failed")
 	}
 
 	BlockCtx.Committed = true

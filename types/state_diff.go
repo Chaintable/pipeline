@@ -1,10 +1,11 @@
 package types
 
 import (
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
 	"github.com/holiman/uint256"
+	"github.com/kaiachain/kaia/api"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/common/hexutil"
 )
 
 type NewAccount struct {
@@ -39,26 +40,26 @@ type BlockStorageDiff struct {
 }
 
 type Header struct {
-	Number                *hexutil.Big     `json:"number"`
-	Hash                  common.Hash      `json:"hash"`
-	ParentHash            common.Hash      `json:"parentHash"`
-	Nonce                 types.BlockNonce `json:"nonce"`
-	MixHash               common.Hash      `json:"mixHash"`
-	Sha3Uncles            common.Hash      `json:"sha3Uncles"`
-	LogsBloom             types.Bloom      `json:"logsBloom"`
-	StateRoot             common.Hash      `json:"stateRoot"`
-	Miner                 common.Address   `json:"miner"`
-	Difficulty            *hexutil.Big     `json:"difficulty"`
-	ExtraData             hexutil.Bytes    `json:"extraData"`
-	GasLimit              hexutil.Uint64   `json:"gasLimit"`
-	GasUsed               hexutil.Uint64   `json:"gasUsed"`
-	Timestamp             hexutil.Uint64   `json:"timestamp"`
-	TransactionsRoot      common.Hash      `json:"transactionsRoot"`
-	ReceiptsRoot          common.Hash      `json:"receiptsRoot"`
-	BaseFeePerGas         *hexutil.Big     `json:"baseFeePerGas,omitempty"`
-	WithdrawalsRoot       *common.Hash     `json:"withdrawalsRoot,omitempty"`
-	BlobGasUsed           *hexutil.Uint64  `json:"blobGasUsed,omitempty"`
-	ExcessBlobGas         *hexutil.Uint64  `json:"excessBlobGas,omitempty"`
-	ParentBeaconBlockRoot *common.Hash     `json:"parentBeaconBlockRoot,omitempty"`
-	RequestsRoot          *common.Hash     `json:"requestsRoot,omitempty"`
+	Number                *hexutil.Big    `json:"number"`
+	Hash                  common.Hash     `json:"hash"`
+	ParentHash            common.Hash     `json:"parentHash"`
+	Nonce                 api.BlockNonce  `json:"nonce"`
+	MixHash               common.Hash     `json:"mixHash"`
+	Sha3Uncles            common.Hash     `json:"sha3Uncles"`
+	LogsBloom             types.Bloom     `json:"logsBloom"`
+	StateRoot             common.Hash     `json:"stateRoot"`
+	Miner                 common.Address  `json:"miner"`
+	Difficulty            *hexutil.Big    `json:"difficulty"`
+	ExtraData             hexutil.Bytes   `json:"extraData"`
+	GasLimit              hexutil.Uint64  `json:"gasLimit"`
+	GasUsed               hexutil.Uint64  `json:"gasUsed"`
+	Timestamp             hexutil.Uint64  `json:"timestamp"`
+	TransactionsRoot      common.Hash     `json:"transactionsRoot"`
+	ReceiptsRoot          common.Hash     `json:"receiptsRoot"`
+	BaseFeePerGas         *hexutil.Big    `json:"baseFeePerGas,omitempty"`
+	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty"`
+	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty"`
+	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty"`
+	RequestsRoot          *common.Hash    `json:"requestsRoot,omitempty"`
 }

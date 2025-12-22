@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/MetisProtocol/mvm/l2geth/metrics"
+	"github.com/kaiachain/kaia/metrics"
 )
 
 var (

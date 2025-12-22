@@ -22,15 +22,14 @@ import (
 	"math/big"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/MetisProtocol/mvm/l2geth/accounts/abi"
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
-	"github.com/MetisProtocol/mvm/l2geth/core/vm"
+	"github.com/kaiachain/kaia/accounts/abi"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/blockchain/vm"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/common/hexutil"
 )
 
 type EVMLogger interface {
@@ -174,15 +173,14 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	}
 }
 
-func (t *callTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (t *callTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if op == vm.SSTORE {
 		t.callstack[len(t.callstack)-1].SelfStorageChange = true
 		t.callstack[len(t.callstack)-1].StorageChange = true
 	}
-	return nil
 }
 
-func (t *callTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
 	callType := vm.CALL
 	if create {
@@ -197,16 +195,14 @@ func (t *callTracer) CaptureStart(from common.Address, to common.Address, create
 		Value: value,
 	}
 	t.callstack = append(t.callstack, call)
-	return nil
 }
 
-func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, _ time.Duration, err error) error {
+func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 	if len(t.callstack) != 1 {
-		return nil
+		return
 	}
 	t.callstack[0].GasUsed = gasUsed
 	t.callstack[0].processOutput(output, err)
-	return nil
 }
 
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -238,8 +234,13 @@ func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
-	return nil
+func (t *callTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
+}
+
+func (t *callTracer) CaptureTxStart(gas uint64) {
+}
+
+func (t *callTracer) CaptureTxEnd(restGas uint64) {
 }
 
 func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {

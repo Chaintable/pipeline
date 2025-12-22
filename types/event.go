@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
+	"github.com/kaiachain/kaia/common/hexutil"
 )
 
 // id = to_hash(event['parent_trace_id'], event['pos_in_parent_trace'])

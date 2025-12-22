@@ -1,6 +1,6 @@
 package types
 
-import "github.com/MetisProtocol/mvm/l2geth/common/hexutil"
+import "github.com/kaiachain/kaia/common/hexutil"
 
 type DebankOutPut struct {
 	BlockFile      *BlockFile    `json:"block_file"`

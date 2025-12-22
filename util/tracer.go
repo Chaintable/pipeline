@@ -6,9 +6,9 @@ import (
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/MetisProtocol/mvm/l2geth/common"
-	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
-	"github.com/MetisProtocol/mvm/l2geth/core/types"
+	"github.com/kaiachain/kaia/blockchain/types"
+	"github.com/kaiachain/kaia/common"
+	"github.com/kaiachain/kaia/common/hexutil"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {

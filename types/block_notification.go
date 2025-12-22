@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/MetisProtocol/mvm/l2geth/common"
+	"github.com/kaiachain/kaia/common"
 )
 
 type BlockChangeNotification struct {
