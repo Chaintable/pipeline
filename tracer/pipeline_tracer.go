@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kaiachain/kaia/blockchain"
 	"github.com/kaiachain/kaia/crypto"
 
 	"github.com/Chaintable/pipeline/metrics"
@@ -180,7 +179,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc blockchain.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
