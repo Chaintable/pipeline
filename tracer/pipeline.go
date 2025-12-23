@@ -58,15 +58,23 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		var account account.LegacyAccount
-		if err := rlp.DecodeBytes(v, &account); err != nil {
+		var acc account.Account
+		if err := rlp.DecodeBytes(v, &acc); err != nil {
 			panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
 		}
+		var codeHash = crypto.Keccak256(nil)
+		if acc.Type() == account.SmartContractAccountType {
+			programAccount := account.GetProgramAccount(acc)
+			if programAccount != nil {
+				codeHash = programAccount.GetCodeHash()
+			}
+		}
+
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  uint256.MustFromBig(account.Balance),
-			Nonce:    uint64(account.Nonce),
-			CodeHash: common.BytesToHash(account.CodeHash),
+			Balance:  uint256.MustFromBig(acc.GetBalance()),
+			Nonce:    uint64(acc.GetNonce()),
+			CodeHash: common.BytesToHash(codeHash),
 		})
 	}
 	for account, storage := range storages {
