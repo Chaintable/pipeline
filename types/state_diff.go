@@ -44,7 +44,7 @@ type Header struct {
 	Number                *hexutil.Big    `json:"number"`
 	Hash                  common.Hash     `json:"hash"`
 	ParentHash            common.Hash     `json:"parentHash"`
-	Nonce                 BlockNonce      `json:"nonce"`
+	Nonce                 string          `json:"nonce"`
 	MixHash               common.Hash     `json:"mixHash"`
 	Sha3Uncles            common.Hash     `json:"sha3Uncles"`
 	LogsBloom             types.Bloom     `json:"logsBloom"`
