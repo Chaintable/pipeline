@@ -63,12 +63,18 @@ func ecrecover(header *types.Header) (common.Address, error) {
 }
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
+	miner, err := ecrecover(rawBlock.Header())
+	if err != nil {
+		log.Println("Failed to ecrecover miner", "err", err)
+		miner = common.Address{}
+	}
+
 	block := ptypes.Block{
 		ID:                    rawBlock.Hash().Hex(),
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
 		BaseFeePerGas:         big.NewInt(0),
-		Miner:                 strings.ToLower(rawBlock.Rewardbase().Hex()),
+		Miner:                 strings.ToLower(miner.Hex()),
 		GasLimit:              big.NewInt(int64(params.UpperGasLimit)),
 		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
 		Timestamp:             rawBlock.Header().Time.Uint64(),
@@ -87,7 +93,7 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 		Number:     (*hexutil.Big)(block.Number()),
 		Hash:       block.Hash(),
 		ParentHash: block.ParentHash(),
-		Nonce:      "0x00000000",
+		Nonce:      "0x0000000000000000",
 		MixHash:    common.BytesToHash(block.Header().MixHash),
 		Sha3Uncles: common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"), // always the empty hash for klay
 		LogsBloom:  block.Bloom(),
