@@ -59,9 +59,14 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	}
 	for k, v := range accounts {
 		var acc account.Account
-		if err := rlp.DecodeBytes(v, &acc); err != nil {
-			panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
+		serializer := account.NewAccountSerializer()
+		if err := rlp.DecodeBytes(v, serializer); err != nil {
+			panic(err)
 		}
+		acc = serializer.GetAccount()
+		// if err := rlp.DecodeBytes(v, &acc); err != nil {
+		// 	panic(fmt.Sprintf("failed to decode account %s: %v", k.Hex(), err))
+		// }
 		var codeHash = crypto.Keccak256(nil)
 		if acc.Type() == account.SmartContractAccountType {
 			programAccount := account.GetProgramAccount(acc)
