@@ -33,7 +33,7 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 		Hash:             block.Hash(),
 		ParentHash:       block.ParentHash(),
 		Nonce:            [8]byte{}, // always the empty nonce for klay
-		MixHash:          common.Hash(block.Header().MixHash),
+		MixHash:          common.BytesToHash(block.Header().MixHash),
 		Sha3Uncles:       common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"), // always the empty hash for klay
 		LogsBloom:        block.Bloom(),
 		StateRoot:        block.Root(),
