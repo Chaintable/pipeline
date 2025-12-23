@@ -175,8 +175,10 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 
 func (t *callTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost, ccLeft, ccOpcode uint64, scope *vm.ScopeContext, depth int, err error) {
 	if op == vm.SSTORE {
-		t.callstack[len(t.callstack)-1].SelfStorageChange = true
-		t.callstack[len(t.callstack)-1].StorageChange = true
+		if len(t.callstack) > 0 {
+			t.callstack[len(t.callstack)-1].SelfStorageChange = true
+			t.callstack[len(t.callstack)-1].StorageChange = true
+		}
 	}
 }
 
