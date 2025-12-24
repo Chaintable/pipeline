@@ -131,7 +131,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		GasTipCap:        common.Big0,
 		Input:            tx.Data(),
 		Nonce:            big.NewInt(int64(tx.Nonce())),
-		TransactionIndex: receipt.TransactionIndex,
+		TransactionIndex: int64(receipt.TranscationIndex),
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
 	return transaction
