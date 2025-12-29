@@ -6,9 +6,9 @@ import (
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/scroll-tech/go-ethereum/common"
+	"github.com/scroll-tech/go-ethereum/common/hexutil"
+	"github.com/scroll-tech/go-ethereum/core/types"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -62,9 +62,6 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	}
 	if block.Header().ParentBeaconRoot != nil {
 		blockHeader.ParentBeaconBlockRoot = block.Header().ParentBeaconRoot
-	}
-	if block.Header().RequestsHash != nil {
-		blockHeader.RequestsRoot = block.Header().RequestsHash
 	}
 	return &blockHeader
 }
