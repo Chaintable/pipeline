@@ -11,6 +11,7 @@ import (
 	"github.com/Chaintable/pipeline/writer"
 	"github.com/holiman/uint256"
 	"github.com/scroll-tech/go-ethereum/common"
+	"github.com/scroll-tech/go-ethereum/core/state/snapshot"
 	"github.com/scroll-tech/go-ethereum/core/types"
 	"github.com/scroll-tech/go-ethereum/crypto"
 	"github.com/scroll-tech/go-ethereum/log"
@@ -143,12 +144,12 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		account, _ := snapshot.FullAccount(v)
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
+			Balance:  uint256.MustFromBig(account.Balance),
 			Nonce:    uint64(account.Nonce),
-			CodeHash: common.BytesToHash(account.CodeHash),
+			CodeHash: common.BytesToHash(account.KeccakCodeHash),
 		})
 	}
 	for account, storage := range storages {
