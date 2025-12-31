@@ -12,6 +12,7 @@ import (
 
 	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
+	"github.com/ethereum/go-ethereum/crypto"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -34,14 +35,14 @@ type PipelineTracer struct {
 }
 
 type pipelineTracerConfig struct {
-	Region               string   `json:"region"`
-	NodeXBucket          string   `json:"node_x_bucket"`
-	ChainTableBucket     string   `json:"chain_table_bucket"`
-	Brokers              []string `json:"brokers"`
-	Topic                string   `json:"topic"`
-	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
-	Version              string   `json:"version"`
+	Region           string   `json:"region"`
+	NodeXBucket      string   `json:"node_x_bucket"`
+	ChainTableBucket string   `json:"chain_table_bucket"`
+	Brokers          []string `json:"brokers"`
+	Topic            string   `json:"topic"`
+	S3TempDir        string   `json:"s3_temp_dir"`
+	IsBackup         *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
+	Version          string   `json:"version"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
@@ -555,4 +556,8 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
+}
+
+func addressToHash(a common.Address) common.Hash {
+	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }
