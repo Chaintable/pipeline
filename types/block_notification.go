@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/morph-l2/go-ethereum/common"
 )
 
 type BlockChangeNotification struct {

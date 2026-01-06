@@ -6,9 +6,9 @@ import (
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/morph-l2/go-ethereum/common"
+	"github.com/morph-l2/go-ethereum/common/hexutil"
+	"github.com/morph-l2/go-ethereum/core/types"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -79,9 +79,6 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		gasPrice = tx.GasPrice()
 	}
 	nonce := tx.Nonce()
-	if nonce == 0 && receipt.DepositNonce != nil {
-		nonce = *receipt.DepositNonce
-	}
 
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),

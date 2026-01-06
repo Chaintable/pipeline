@@ -9,11 +9,11 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/writer"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/morph-l2/go-ethereum/common"
+	"github.com/morph-l2/go-ethereum/core/types"
+	"github.com/morph-l2/go-ethereum/crypto"
+	"github.com/morph-l2/go-ethereum/log"
+	"github.com/morph-l2/go-ethereum/rlp"
 	"github.com/holiman/uint256"
 )
 
@@ -143,12 +143,15 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		var account types.StateAccount
+		if err := rlp.DecodeBytes(v, &account); err != nil {
+			continue
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
-			Nonce:    uint64(account.Nonce),
-			CodeHash: common.BytesToHash(account.CodeHash),
+			Balance:  uint256.MustFromBig(account.Balance),
+			Nonce:    account.Nonce,
+			CodeHash: common.BytesToHash(account.KeccakCodeHash),
 		})
 	}
 	for account, storage := range storages {

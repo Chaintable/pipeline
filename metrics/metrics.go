@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/morph-l2/go-ethereum/metrics"
 )
 
 var (

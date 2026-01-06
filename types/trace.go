@@ -3,7 +3,7 @@ package types
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/morph-l2/go-ethereum/common/hexutil"
 )
 
 // id = to_hash(trace['tx_id'], trace['parent_trace_id'], trace['pos_in_parent_trace'])
