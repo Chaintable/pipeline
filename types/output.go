@@ -1,6 +1,6 @@
 package types
 
-import "github.com/ethereum/go-ethereum/common/hexutil"
+import "github.com/XinFinOrg/XDPoSChain/common/hexutil"
 
 type DebankOutPut struct {
 	BlockFile      *BlockFile    `json:"block_file"`
