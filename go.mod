@@ -3,7 +3,7 @@ module github.com/Chaintable/pipeline
 go 1.24.0
 
 require (
-	github.com/XinFinOrg/XDPoSChain v1.6.1-0.20250604090019-fa056d9e633c
+	github.com/XinFinOrg/XDPoSChain v1.6.1-0.20260107131325-146252a30d1b
 	github.com/aws/aws-sdk-go-v2 v1.32.5
 	github.com/aws/aws-sdk-go-v2/config v1.28.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.66.3
