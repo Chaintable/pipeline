@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/klauspost/compress/gzip"
-
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/scroll-tech/go-ethereum/rlp"
 )
 
 func EncodeToJsonGzip(v any) ([]byte, error) {
