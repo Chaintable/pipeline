@@ -175,6 +175,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	}
 }
 
+// todo(lihe) 看一下 bitlayer 的版本需要实现哪些函数 EVMLogger
 func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
 	callType := vm.CALL
@@ -283,6 +284,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 		remainingTopics = topics[1:]
 	}
 
+	// todo(lihe) 这里的逻辑有分叉，为什么
 	l := ptypes.Event{
 		Address:  strings.ToLower(log.Address.Hex()),
 		Selector: selector,
@@ -315,7 +317,7 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		// todo(lihe) origin is cf.To why delegatecall judge?
+		// todo(lihe) origin is cf.To why delegatecall judge? 需要 extra 吗
 		if cf.Type == vm.DELEGATECALL {
 			ChangeContracts[cf.From] = struct{}{}
 		} else {

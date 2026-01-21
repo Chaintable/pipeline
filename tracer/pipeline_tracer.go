@@ -457,6 +457,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		}
 	}
 
+	// todo(lihe) 这段 bitlayer 可能是不需要的
 	// 添加原生代币合约创建 tx 和 trace (E地址)
 	nativeTokenAddr := "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	nativeTokenTxID := fmt.Sprintf("0xgenesis03%013d%s", 0, nativeTokenAddr)
