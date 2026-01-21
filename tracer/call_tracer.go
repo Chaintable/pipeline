@@ -66,8 +66,14 @@ func (f callFrame) failed() bool {
 	return len(f.Error) > 0
 }
 
-func (f *callFrame) processOutput(output []byte, err error) {
+func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 	output = common.CopyBytes(output)
+	// todo(lihe) is revert is need?
+	// Clear error if tx wasn't reverted. This happened
+	// for pre-homestead contract storage OOG.
+	if err != nil && !reverted {
+		err = nil
+	}
 	if err == nil {
 		f.Output = output
 		return
@@ -95,6 +101,7 @@ type callTracer struct {
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
+	// todo(lihe) why has blockfile and change contracts
 	ChangeContracts map[common.Address]struct{}
 	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
 
@@ -189,7 +196,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 		return
 	}
 	t.callstack[0].GasUsed = gasUsed
-	t.callstack[0].processOutput(output, err)
+	t.callstack[0].processOutput(output, err, err != nil)
 }
 
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -216,7 +223,7 @@ func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	size -= 1
 
 	call.GasUsed = usedGas
-	call.processOutput(output, err)
+	call.processOutput(output, err, err != nil)
 	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
@@ -259,6 +266,7 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
+	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
 	}
@@ -273,6 +281,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 		selector = topics[0]
 		remainingTopics = topics[1:]
 	}
+
 	l := ptypes.Event{
 		Address:  strings.ToLower(log.Address.Hex()),
 		Selector: selector,
@@ -305,7 +314,12 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		ChangeContracts[*cf.To] = struct{}{}
+		// todo(lihe) origin is cf.To why delegatecall judge?
+		if cf.Type == vm.DELEGATECALL {
+			ChangeContracts[cf.From] = struct{}{}
+		} else {
+			ChangeContracts[*cf.To] = struct{}{}
+		}
 	}
 	subCallStorageChange := false
 	for i := range cf.Calls {
@@ -336,6 +350,7 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 		}
 	}
 	for i := range cf.Calls {
+		// todo(lihe) can use 		if cf.Calls[i].failed() {?
 		if cf.failed() || cf.ParentFailed {
 			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		} else {
