@@ -51,11 +51,22 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 	return blockNotice, nil
 }
 
+// FixedPartitionBalancer always returns partition 0
+type FixedPartitionBalancer struct{}
+
+func (f *FixedPartitionBalancer) Balance(msg kafka.Message, partitions ...int) int {
+	// Always return the first partition (partition 0)
+	if len(partitions) > 0 {
+		return partitions[0]
+	}
+	return 0
+}
+
 func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
 	return &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
-		Balancer:     &kafka.Hash{},
+		Balancer:     &FixedPartitionBalancer{},
 		RequiredAcks: kafka.RequireOne,
 		BatchBytes:   1024 * 1024 * 10, // 10MB
 		// 默认100个，或者等待1s才发生
@@ -69,9 +80,8 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 		return err
 	}
 	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:       []byte("NewBlock"),
-		Value:     value,
-		Partition: 0,
+		Key:   []byte("NewBlock"),
+		Value: value,
 	})
 	if err != nil {
 		return err
@@ -85,9 +95,8 @@ func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBl
 		return err
 	}
 	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:       []byte("NewBlock"),
-		Value:     value,
-		Partition: 0,
+		Key:   []byte("NewBlock"),
+		Value: value,
 	})
 	if err != nil {
 		return err
