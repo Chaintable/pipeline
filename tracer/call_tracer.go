@@ -93,6 +93,8 @@ func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 	}
 }
 
+var _ vm.EVMLogger = (*callTracer)(nil)
+
 type callTracer struct {
 	callstack []callFrame
 	gasLimit  uint64
