@@ -70,4 +70,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/Chaintable/bitlayer-l2 v0.0.0-20260121093412-283033192ab6
+replace github.com/ethereum/go-ethereum => github.com/Chaintable/bitlayer-l2 v0.0.0-20260121164730-874d3dd06161
