@@ -68,7 +68,6 @@ func (f callFrame) failed() bool {
 
 func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 	output = common.CopyBytes(output)
-	// todo(lihe) is revert is need?
 	// Clear error if tx wasn't reverted. This happened
 	// for pre-homestead contract storage OOG.
 	if err != nil && !reverted {
@@ -350,8 +349,7 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 		}
 	}
 	for i := range cf.Calls {
-		// todo(lihe) can use 		if cf.Calls[i].failed() {?
-		if cf.failed() || cf.ParentFailed {
+		if cf.Calls[i].failed() {
 			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		} else {
 			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
