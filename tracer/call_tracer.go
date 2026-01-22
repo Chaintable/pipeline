@@ -102,7 +102,6 @@ type callTracer struct {
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
-	// todo(lihe) why has blockfile and change contracts
 	ChangeContracts map[common.Address]struct{}
 	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
 
@@ -175,7 +174,6 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	}
 }
 
-// todo(lihe) 看一下 bitlayer 的版本需要实现哪些函数 EVMLogger
 func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
 	callType := vm.CALL
@@ -317,7 +315,6 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		// todo(lihe) origin is cf.To why delegatecall judge? 需要 extra 吗
 		if cf.Type == vm.DELEGATECALL {
 			ChangeContracts[cf.From] = struct{}{}
 		} else {
