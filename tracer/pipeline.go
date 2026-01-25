@@ -15,7 +15,6 @@ import (
 	"github.com/scroll-tech/go-ethereum/core/types"
 	"github.com/scroll-tech/go-ethereum/crypto"
 	"github.com/scroll-tech/go-ethereum/log"
-	"github.com/scroll-tech/go-ethereum/rlp"
 )
 
 type ExtraInfo struct {
@@ -138,7 +137,7 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	return nil
 }
 
-func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
+func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash]common.Hash, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
 	stateDiff := &ptypes.BlockStorageDiff{}
 	for addrhash := range destructs {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
@@ -156,13 +155,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		Values := make([]ptypes.IndexValuePair, 0, len(storage))
 		for index, v := range storage {
 			value := uint256.NewInt(0)
-			if len(v) > 0 {
-				_, content, _, err := rlp.Split(v)
-				if err != nil {
-					log.Error("Failed to split storage", "err", err)
-				}
-				value = uint256.NewInt(0).SetBytes(content)
-			}
+			value = uint256.NewInt(0).SetBytes(v.Bytes())
 			Values = append(Values, ptypes.IndexValuePair{
 				Index: index,
 				Value: value,
