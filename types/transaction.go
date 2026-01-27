@@ -3,7 +3,7 @@ package types
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
 )
 
 type Transaction struct {

@@ -10,19 +10,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/MetisProtocol/mvm/l2geth/crypto"
 
 	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/tracing"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/MetisProtocol/mvm/l2geth/common"
+	"github.com/MetisProtocol/mvm/l2geth/common/hexutil"
+	"github.com/MetisProtocol/mvm/l2geth/core/types"
+	"github.com/MetisProtocol/mvm/l2geth/core/vm"
+	"github.com/MetisProtocol/mvm/l2geth/log"
+	"github.com/MetisProtocol/mvm/l2geth/params"
 )
 
 // 需要上传3种data
@@ -30,22 +30,22 @@ import (
 // 2. state diff
 // 3. block file
 
+var _ EVMLogger = (*PipelineTracer)(nil)
+
 type PipelineTracer struct {
-	config         pipelineTracerConfig
-	callTracer     *callTracer
-	prestateTracer *prestateTracer
+	config     pipelineTracerConfig
+	callTracer *callTracer
 }
 
 type pipelineTracerConfig struct {
-	Region               string   `json:"region"`
-	NodeXBucket          string   `json:"node_x_bucket"`
-	ChainTableBucket     string   `json:"chain_table_bucket"`
-	Brokers              []string `json:"brokers"`
-	Topic                string   `json:"topic"`
-	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
-	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
-	Version              string   `json:"version"`
+	Region           string   `json:"region"`
+	NodeXBucket      string   `json:"node_x_bucket"`
+	ChainTableBucket string   `json:"chain_table_bucket"`
+	Brokers          []string `json:"brokers"`
+	Topic            string   `json:"topic"`
+	S3TempDir        string   `json:"s3_temp_dir"`
+	IsBackup         *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
+	Version          string   `json:"version"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
@@ -163,11 +163,6 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	if err != nil {
 		log.Crit("Failed to start ChainTableBucketPusher upload work", "err", err)
 	}
-
-	metrics.NodeInfo.Update(map[string]string{
-		"chain_id": chainConfig.ChainID.String(),
-		"role":     "writer",
-	})
 }
 
 func (t *PipelineTracer) OnClose() {
@@ -195,15 +190,15 @@ func (t *PipelineTracer) OnClose() {
 	}
 }
 
-func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
+func (t *PipelineTracer) OnBlockStart(block *types.Block) {
 	BlockCtx = &ExtraInfo{
-		BlockNumber: event.Block.Number().Uint64(),
-		BlockHash:   event.Block.Hash(),
+		BlockNumber: block.NumberU64(),
+		BlockHash:   block.Hash(),
 	}
 	BlockCtx.BlockDiff = &ptypes.BlockStorageDiff{}
-	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(event.Block)
+	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(block)
 	BlockCtx.BlockFile = &ptypes.BlockFile{
-		Block:            util.BuildPipelineBlock(event.Block),
+		Block:            util.BuildPipelineBlock(block),
 		Events:           make([]ptypes.Event, 0),
 		Txs:              make([]ptypes.Transaction, 0),
 		Traces:           make([]ptypes.Trace, 0),
@@ -216,17 +211,6 @@ func (t *PipelineTracer) OnBlockStart(event tracing.BlockEvent) {
 	BlockCtx.BlockStartTime = time.Now()
 	BlockCtx.Committed = false
 	BlockCtx.ChangeContracts = make(map[common.Address]struct{})
-	if t.config.EnablePreStateTracer {
-		t.prestateTracer = newPrestateTracer(&prestateTracerConfig{
-			DiffMode: true,
-		})
-	}
-}
-
-func (t *PipelineTracer) OnSystemCallStartHookV2(vm *tracing.VMContext) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnSystemCallStartHookV2(vm)
-	}
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
@@ -246,19 +230,51 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 		}
 	}
 	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
-
-	// TODO on commit
 }
 
-func (t *PipelineTracer) OnTxStart(vm *tracing.VMContext, tx *types.Transaction, from common.Address) {
+func (t *PipelineTracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+	if t.callTracer != nil {
+		return t.callTracer.CaptureStart(from, to, create, input, gas, value)
+	}
+	return nil
+}
+
+func (t *PipelineTracer) CaptureEnd(output []byte, gasUsed uint64, tm time.Duration, err error) error {
+	if t.callTracer != nil {
+		return t.callTracer.CaptureEnd(output, gasUsed, tm, err)
+	}
+	return nil
+}
+
+func (t *PipelineTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureEnter(typ, from, to, input, gas, value)
+	}
+}
+
+func (t *PipelineTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureExit(output, gasUsed, err)
+	}
+}
+
+func (t *PipelineTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	if t.callTracer != nil {
+		return t.callTracer.CaptureFault(env, pc, op, gas, cost, memory, stack, contract, depth, err)
+	}
+	return nil
+}
+
+func (t *PipelineTracer) CaptureTxStart(gas uint64) {
+}
+
+func (t *PipelineTracer) CaptureTxEnd(restGas uint64) {
+}
+
+func (t *PipelineTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
 	t.callTracer = callTracer
-	t.callTracer.OnTxStart(vm, tx, from)
-
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnTxStart(vm, tx, from)
-	}
-
+	t.callTracer.OnTxStart(tx, from)
 	BlockCtx.Tx = tx
 	BlockCtx.From = from
 	BlockCtx.TxStartTime = time.Now()
@@ -271,33 +287,15 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
 
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnTxEnd(receipt, err)
-	}
-
 	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
-func (t *PipelineTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *PipelineTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if t.callTracer != nil {
-		t.callTracer.OnEnter(depth, typ, from, to, input, gas, value)
+		return t.callTracer.CaptureState(env, pc, op, gas, cost, memory, stack, contract, depth, err)
 	}
-}
-
-func (t *PipelineTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if t.callTracer != nil {
-		t.callTracer.OnExit(depth, output, gasUsed, err, reverted)
-	}
-}
-
-func (t *PipelineTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	if t.callTracer != nil {
-		t.callTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
-	}
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
-	}
+	return nil
 }
 
 func (t *PipelineTracer) OnLog(log *types.Log) {
@@ -306,7 +304,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
@@ -536,21 +534,9 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 }
 
-func (t *PipelineTracer) OnBlockDBStart(db tracing.StateDB) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnBlockDBStart(db)
-	}
-}
-
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
 	if originRoot != root {
-		var stateDiff *ptypes.BlockStorageDiff
-		if t.config.EnablePreStateTracer {
-			stateDiff = t.prestateTracer.GetStateDiff(originRoot, root)
-		} else {
-			stateDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
-		}
-		BlockCtx.BlockDiff = stateDiff
+		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
 	} else {
 		BlockCtx.BlockDiff = nil
 	}
@@ -638,11 +624,5 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 }
 
 func addressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
-}
-
-func (t *PipelineTracer) OnBalanceChange(addr common.Address, prev, new *big.Int, reason tracing.BalanceChangeReason) {
-	if t.prestateTracer != nil {
-		t.prestateTracer.OnBalanceChange(addr, prev, new, reason)
-	}
+	return crypto.Keccak256Hash(a.Bytes())
 }
