@@ -63,9 +63,6 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	if block.Header().ParentBeaconRoot != nil {
 		blockHeader.ParentBeaconBlockRoot = block.Header().ParentBeaconRoot
 	}
-	if block.Header().RequestsHash != nil {
-		blockHeader.RequestsRoot = block.Header().RequestsHash
-	}
 	return &blockHeader
 }
 
@@ -94,7 +91,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
 	switch tx.Type() {
-	case types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
+	case types.DynamicFeeTxType, types.BlobTxType:
 		transaction.GasFeeCap = tx.GasFeeCap()
 		transaction.GasTipCap = tx.GasTipCap()
 	}

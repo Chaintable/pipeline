@@ -29,7 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 )
@@ -163,24 +162,55 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	}
 }
 
-func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	if vm.OpCode(opcode) == vm.SSTORE {
-		t.callstack[len(t.callstack)-1].SelfStorageChange = true
-		t.callstack[len(t.callstack)-1].StorageChange = true
-	}
+// vm.EVMLogger interface implementation
+
+func (t *callTracer) CaptureTxStart(gasLimit uint64) {
+	t.gasLimit = gasLimit
 }
 
-// OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
-	t.depth = depth
-	// Skip if tracing was interrupted
+func (t *callTracer) CaptureTxEnd(restGas uint64) {
+}
+
+func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+	t.depth = 0
+	if t.interrupt.Load() {
+		return
+	}
+
+	toCopy := to
+	typ := vm.CALL
+	if create {
+		typ = vm.CREATE
+	}
+	call := callFrame{
+		Type:  typ,
+		From:  from,
+		To:    &toCopy,
+		Input: common.CopyBytes(input),
+		Gas:   t.gasLimit,
+		Value: value,
+	}
+	t.callstack = append(t.callstack, call)
+}
+
+func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+	if len(t.callstack) != 1 {
+		return
+	}
+	t.callstack[0].GasUsed = gasUsed
+	reverted := err != nil && errors.Is(err, vm.ErrExecutionReverted)
+	t.callstack[0].processOutput(output, err, reverted)
+}
+
+func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+	t.depth++
 	if t.interrupt.Load() {
 		return
 	}
 
 	toCopy := to
 	call := callFrame{
-		Type:  vm.OpCode(typ),
+		Type:  typ,
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
@@ -190,49 +220,47 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 	t.callstack = append(t.callstack, call)
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if depth == 0 {
-		t.captureEnd(output, gasUsed, err, reverted)
-		return
-	}
-
-	t.depth = depth - 1
+func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+	t.depth--
 
 	size := len(t.callstack)
 	if size <= 1 {
 		return
 	}
-	// Pop call.
+
 	call := t.callstack[size-1]
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
 	call.GasUsed = gasUsed
+	reverted := err != nil && errors.Is(err, vm.ErrExecutionReverted)
 	call.processOutput(output, err, reverted)
-	// Nest call into parent.
-	// 忽略失败的调用
 	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
-	if len(t.callstack) != 1 {
-		return
+func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+	if op == vm.SSTORE {
+		t.callstack[len(t.callstack)-1].SelfStorageChange = true
+		t.callstack[len(t.callstack)-1].StorageChange = true
 	}
-	t.callstack[0].GasUsed = gasUsed
-	t.callstack[0].processOutput(output, err, reverted)
 }
 
-func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
+func (t *callTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+}
+
+// Custom methods for RPCTracer
+
+func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
-	// Error happened during tx validation.
 	if err != nil {
+		return
+	}
+	if len(t.callstack) == 0 {
 		return
 	}
 	setParentFailed(&t.callstack[0], false)
@@ -311,7 +339,7 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		if cf.Type == vm.DELEGATECALL || cf.Type == vm.EXTDELEGATECALL {
+		if cf.Type == vm.DELEGATECALL {
 			ChangeContracts[cf.From] = struct{}{}
 		} else {
 			ChangeContracts[*cf.To] = struct{}{}
