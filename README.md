@@ -132,16 +132,28 @@ pipeline/
 
 ## Data Flow
 
+**Mode 1: Live Tracer**
 ```
-Ethereum Node
+Ethereum Node (block execution)
     ↓
-Pipeline Tracer (extract blocks/transactions/state)
+PipelineTracer (EVM hooks)
     ↓
-Call/PreState Tracers (detailed tracing)
+CallTracer + PrestateTracer (traces, events, state diff)
     ↓
 Processor (serialize to JSON/gzip + RLP)
     ↓
 S3 Upload (dual bucket) + Kafka Publish (BlockChangeNotification)
+```
+
+**Mode 2: RPC Tracer**
+```
+RPC Request (trace_debankBlock)
+    ↓
+Block Replay with RPCTracer
+    ↓
+CallTracer + PrestateTracer (traces, events, state diff)
+    ↓
+Return DebankOutPut (BlockFile + Header + StateDiff + ValidationHash)
 ```
 
 ## Dependencies

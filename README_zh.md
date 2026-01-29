@@ -132,16 +132,28 @@ pipeline/
 
 ## 数据流程
 
+**模式 1：Live Tracer**
 ```
-以太坊节点
+以太坊节点（区块执行）
     ↓
-Pipeline Tracer（提取区块/交易/状态）
+PipelineTracer（EVM 钩子）
     ↓
-Call/PreState Tracers（详细追踪）
+CallTracer + PrestateTracer（追踪、事件、状态差异）
     ↓
 Processor（序列化为 JSON/gzip + RLP）
     ↓
 S3 上传（双桶）+ Kafka 发布（BlockChangeNotification）
+```
+
+**模式 2：RPC Tracer**
+```
+RPC 请求（trace_debankBlock）
+    ↓
+使用 RPCTracer 重放区块
+    ↓
+CallTracer + PrestateTracer（追踪、事件、状态差异）
+    ↓
+返回 DebankOutPut（BlockFile + Header + StateDiff + ValidationHash）
 ```
 
 ## 依赖

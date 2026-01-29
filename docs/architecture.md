@@ -523,7 +523,33 @@ BlockPushTimer            // Kafka push time
 
 ## Data Flow
 
-### Block Processing Flow
+Pipeline supports two integration modes with different data flows:
+
+**Mode 1: Live Tracer**
+```
+Ethereum Node (block execution)
+    ↓
+PipelineTracer (EVM hooks)
+    ↓
+CallTracer + PrestateTracer (traces, events, state diff)
+    ↓
+Processor (serialize to JSON/gzip + RLP)
+    ↓
+S3 Upload (dual bucket) + Kafka Publish (BlockChangeNotification)
+```
+
+**Mode 2: RPC Tracer**
+```
+RPC Request (trace_debankBlock)
+    ↓
+Block Replay with RPCTracer
+    ↓
+CallTracer + PrestateTracer (traces, events, state diff)
+    ↓
+Return DebankOutPut (BlockFile + Header + StateDiff + ValidationHash)
+```
+
+### Block Processing Flow (Live Tracer)
 
 ```
 1. OnBlockStart

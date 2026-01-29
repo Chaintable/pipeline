@@ -25,24 +25,39 @@ go test -v -run TestFunctionName ./package/...
 
 ## 架构概览
 
+Pipeline 支持两种集成模式：
+
+**模式 1：Live Tracer** - 实时追踪，自动上传 S3 和发布 Kafka
 ```
-Ethereum Node
+以太坊节点（区块执行）
     ↓
-Pipeline Tracer (提取区块/交易/状态)
+PipelineTracer（EVM 钩子）
     ↓
-Call/PreState Tracers (详细追踪)
+CallTracer + PrestateTracer（追踪、事件、状态差异）
     ↓
-Processor (序列化为 JSON/gzip + RLP)
+Processor（序列化为 JSON/gzip + RLP）
     ↓
-S3 上传 (双桶策略) + Kafka 发布 (BlockChangeNotification)
+S3 上传（双桶）+ Kafka 发布（BlockChangeNotification）
+```
+
+**模式 2：RPC Tracer** - 按需追踪，通过 `trace_debankBlock` RPC 接口
+```
+RPC 请求（trace_debankBlock）
+    ↓
+使用 RPCTracer 重放区块
+    ↓
+CallTracer + PrestateTracer（追踪、事件、状态差异）
+    ↓
+返回 DebankOutPut（BlockFile + Header + StateDiff + ValidationHash）
 ```
 
 ### 核心模块
 
 - **tracer/**: 区块链数据提取，使用以太坊 tracing 机制
-  - `pipeline_tracer.go` - 主追踪器编排器，配置和初始化追踪管线
+  - `pipeline_tracer.go` - Live Tracer 模式，实时追踪并上传 S3/Kafka
+  - `rpc_tracer.go` - RPC Tracer 模式，实现 trace_debankBlock 接口
   - `call_tracer.go` - 交易调用栈追踪
-  - `prestate_tracer.go` - 交易执行前状态快照
+  - `prestate_tracer.go` - 状态差异追踪
 
 - **processor/**: 数据处理和序列化
   - `push.go` - S3 上传、Kafka 发布、重试逻辑
@@ -71,15 +86,24 @@ S3 上传 (双桶策略) + Kafka 发布 (BlockChangeNotification)
 
 ### 入口点
 
+**模式 1：Live Tracer**
 ```go
-// 初始化管线
+// 初始化管线（S3 + Kafka）
 tracer.InitPipeline(region, nodeXBucket, chainTableBucket, brokers, topic, bizChainID, version, s3TmpDir)
 
-// 设置领导者选举
+// 设置领导者选举（可选）
 tracer.SetupLeaderElection(etcdEndpoints, electionKey, nodeID, version, isBackup, gracePeriod, writerConfig)
 
-// 创建新的追踪器
-tracer.NewPipelineTracer(configJSON)
+// 创建追踪器并注册到 EVM
+pipelineTracer := tracer.NewPipelineTracer(configJSON)
+```
+
+**模式 2：RPC Tracer**
+```go
+// 实现 trace_debankBlock RPC 方法
+rpcTracer := tracer.NewRPCTracer(configJSON)
+// 重放区块后获取输出
+output := rpcTracer.GetOutPut(originRoot, root, destructs, accounts, storages, codes)
 ```
 
 ### 多链支持

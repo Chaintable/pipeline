@@ -72,7 +72,15 @@ The recommended priority order for choosing a combination:
 This mode embeds the tracer directly into the execution client's block processing loop using go-ethereum's `tracing.Hooks` interface.
 
 ```
-Block Execution → PipelineTracer hooks → Real-time data capture → Upload to S3/Kafka
+Ethereum Node (block execution)
+    ↓
+PipelineTracer (EVM hooks)
+    ↓
+CallTracer + PrestateTracer (traces, events, state diff)
+    ↓
+Processor (serialize to JSON/gzip + RLP)
+    ↓
+S3 Upload (dual bucket) + Kafka Publish (BlockChangeNotification)
 ```
 
 **Characteristics:**
@@ -113,7 +121,13 @@ vm.SetTracer(pipelineTracer.Hooks())
 This mode implements a custom RPC method `trace_debankBlock` that replays blocks and generates trace data on-demand.
 
 ```
-RPC Request (block number) → Block Replay → RPCTracer → Return DebankOutPut
+RPC Request (trace_debankBlock)
+    ↓
+Block Replay with RPCTracer
+    ↓
+CallTracer + PrestateTracer (traces, events, state diff)
+    ↓
+Return DebankOutPut (BlockFile + Header + StateDiff + ValidationHash)
 ```
 
 **Characteristics:**
