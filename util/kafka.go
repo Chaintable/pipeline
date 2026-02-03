@@ -69,9 +69,8 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 		return err
 	}
 	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:       []byte("NewBlock"),
-		Value:     value,
-		Partition: 0,
+		Key:   []byte("NewBlock"),
+		Value: value,
 	})
 	if err != nil {
 		return err
@@ -85,9 +84,8 @@ func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBl
 		return err
 	}
 	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:       []byte("NewBlock"),
-		Value:     value,
-		Partition: 0,
+		Key:   []byte("NewBlock"),
+		Value: value,
 	})
 	if err != nil {
 		return err
