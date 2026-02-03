@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -67,14 +68,17 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 }
 
 func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, from common.Address, baseFee *big.Int) ptypes.Transaction {
+	log.Info("[BuildPipelineTransaction] called", "txHash", tx.Hash(), "baseFee", baseFee, "receipt.EffectiveGasPrice", receipt.EffectiveGasPrice)
 	to := receipt.ContractAddress
 	if tx.To() != nil {
 		to = *tx.To()
 	}
 	gasPrice := receipt.EffectiveGasPrice
 	if gasPrice == nil {
+		log.Info("[BuildPipelineTransaction] receipt.EffectiveGasPrice is nil, fallback to tx.GasPrice()", "txHash", tx.Hash(), "tx.GasPrice()", tx.GasPrice())
 		gasPrice = tx.GasPrice()
 	}
+	log.Info("[BuildPipelineTransaction] final gasPrice", "txHash", tx.Hash(), "gasPrice", gasPrice)
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
 		From:             strings.ToLower(from.Hex()),

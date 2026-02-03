@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type callFrame struct {
@@ -188,11 +189,13 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		Value: value,
 	}
 	t.callstack = append(t.callstack, call)
+	log.Info("[callTracer] OnEnter", "txID", t.txID, "depth", depth, "type", vm.OpCode(typ).String(), "from", from.Hex(), "to", to.Hex(), "gasProvided", gas)
 }
 
 // OnExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
 func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	log.Info("[callTracer] OnExit", "txID", t.txID, "depth", depth, "gasUsed", gasUsed, "reverted", reverted, "err", err)
 	if depth == 0 {
 		t.captureEnd(output, gasUsed, err, reverted)
 		return
@@ -209,6 +212,7 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
+	log.Info("[callTracer] OnExit subcall", "txID", t.txID, "depth", depth, "type", call.Type.String(), "gasProvided", call.Gas, "gasUsed", gasUsed, "gasUsedCalculation", fmt.Sprintf("%d - leftOverGas = %d", call.Gas, gasUsed))
 	call.GasUsed = gasUsed
 	call.processOutput(output, err, reverted)
 	// Nest call into parent.
@@ -221,6 +225,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 	if len(t.callstack) != 1 {
 		return
 	}
+	log.Info("[callTracer] captureEnd (top-level)", "txID", t.txID, "gasUsed", gasUsed, "reverted", reverted, "err", err)
 	t.callstack[0].GasUsed = gasUsed
 	t.callstack[0].processOutput(output, err, reverted)
 }
