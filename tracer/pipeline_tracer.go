@@ -307,9 +307,10 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 }
 
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
-	if NodeXPusher.LastBlockNotice != nil {
-		return
-	}
+	// for xlayer, genesis block is not 0, so we don't need to check if the last block notice is nil
+	// if NodeXPusher.LastBlockNotice != nil {
+	// 	return
+	// }
 
 	// 内部s3
 	header := util.BuildPilelineBlockHeader(block)
