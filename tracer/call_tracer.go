@@ -171,7 +171,7 @@ func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tr
 }
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, _ uint64) {
 	t.depth = depth
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
@@ -311,7 +311,7 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		if cf.Type == vm.DELEGATECALL || cf.Type == vm.EXTDELEGATECALL {
+		if cf.Type == vm.DELEGATECALL {
 			ChangeContracts[cf.From] = struct{}{}
 		} else {
 			ChangeContracts[*cf.To] = struct{}{}

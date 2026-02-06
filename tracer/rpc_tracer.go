@@ -53,9 +53,9 @@ func (t *RPCTracer) OnBlockStart(block *types.Block) {
 	}
 }
 
-func (t *RPCTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *RPCTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, order uint64) {
 	if t.callTracer != nil {
-		t.callTracer.OnEnter(depth, typ, from, to, input, gas, value)
+		t.callTracer.OnEnter(depth, typ, from, to, input, gas, value, order)
 	}
 }
 
