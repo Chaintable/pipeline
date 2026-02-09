@@ -104,6 +104,14 @@ func (t *RPCTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.currentBlock.Tx = tx
 }
 
+func (t *RPCTracer) OnSkipEvmTxStart(tx *types.Transaction, from common.Address) {
+	callTracer := newCallTracerRaw(t.currentBlock.ChangeContracts, t.currentBlock.BlockFile)
+	t.callTracer = callTracer
+	t.callTracer.OnSkipEvmTxStart(tx, from)
+	t.currentBlock.From = from
+	t.currentBlock.Tx = tx
+}
+
 func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
