@@ -237,6 +237,25 @@ func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.txID = tx.Hash().Hex()
 }
 
+func (t *callTracer) OnSkipEvmTxStart(tx *types.Transaction, from common.Address) {
+	t.gasLimit = tx.Gas()
+	t.txID = tx.Hash().Hex()
+
+	toCopy := tx.To()
+	callType := vm.CALL
+
+	call := callFrame{
+		Type:    callType,
+		From:    from,
+		To:      toCopy,
+		Input:   common.CopyBytes(tx.Data()),
+		Gas:     tx.Gas(),
+		GasUsed: 0,
+		Value:   tx.Value(),
+	}
+	t.callstack = append(t.callstack, call)
+}
+
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	// Error happened during tx validation.
 	if err != nil {
