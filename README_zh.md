@@ -156,6 +156,111 @@ CallTracer + PrestateTracer（追踪、事件、状态差异）
 返回 DebankOutPut（BlockFile + Header + StateDiff + ValidationHash）
 ```
 
+## 执行客户端适配
+
+将 Pipeline 集成到执行客户端时，请根据客户端类型选择对应的适配指南：
+
+| 指南 | 适用客户端 | 使用场景 |
+|------|-----------|----------|
+| [标准 Geth 适配](docs/skills/adapt-pipeline-geth/references/adaptation-guide.md) | go-ethereum **v1.14.0+** | 支持 `tracing.Hooks` Live Tracer 的 Geth 及其分叉 |
+| [遗留 Geth 适配](docs/skills/adapt-pipeline-legacy/references/adaptation-guide-legacy.md) | go-ethereum **< v1.14.0** | 使用 `vm.EVMLogger` 接口的旧版 Geth 分叉（如 op-geth） |
+| [Reth 适配](docs/skills/adapt-pipeline-reth/references/adaptation-guide-reth.md) | Reth (Rust) | Rust 客户端；仅 RPC Tracer 模式，无需修改核心 EVM |
+
+### 如何选择
+
+```
+你的客户端是 Rust 编写的吗？
+    是 → Reth 适配指南
+    否 ↓
+你的 Geth 分叉是否有 tracing.Hooks 和 tracers.LiveDirectory？（v1.14.0+）
+    是 → 标准适配指南
+    否 → 遗留适配指南
+```
+
+**核心差异：**
+
+| | 标准 (Geth v1.14.0+) | 遗留 (Geth < v1.14.0) | Reth |
+|-|----------------------|----------------------|------|
+| Tracer 接口 | `tracing.Hooks` | `vm.EVMLogger` | `revm-inspectors` |
+| Pipeline 代码 | Go 模块依赖 | 源码内嵌 | Rust 重新实现 |
+| 集成模式 | Live Tracer + RPC | Live Tracer | 仅 RPC |
+| 核心 EVM 改动 | Hook 注入 | 手动分发 Hook | 无需改动 |
+
+### 使用 Claude Code AI 辅助适配
+
+如果你使用 [Claude Code](https://claude.ai/code)，可以通过交互式适配技能让 AI 引导你完成整个适配过程——自动检测客户端类型、探测代码结构、生成修改代码、逐步验证编译。
+
+#### 前置条件
+
+1. 安装 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+2. 克隆本 Pipeline 仓库
+3. 在本地准备好目标客户端仓库
+
+#### 快速开始
+
+在 Pipeline 仓库目录下打开 Claude Code，运行：
+
+```
+/adapt-pipeline /path/to/your-client
+```
+
+该命令会：
+1. **检测** 客户端类型——扫描 `Cargo.toml`、`go.mod`、`tracing.Hooks`、`vm.EVMLogger` 等特征
+2. **报告** 检测结果（语言、客户端类型、检测依据）
+3. **检查** 是否已有 Pipeline 集成，避免冲突
+4. **路由** 到对应的专用适配技能
+
+#### 示例会话
+
+```
+> /adapt-pipeline /home/user/op-geth
+
+## 检测结果
+- 仓库: /home/user/op-geth
+- 语言: Go
+- 客户端类型: 遗留 Geth
+- 依据: 在 core/vm/logger.go 中发现 vm.EVMLogger，未找到 core/tracing/hooks.go
+- 推荐技能: adapt-pipeline-legacy
+
+正在路由到 /adapt-pipeline-legacy...
+
+## 阶段 1：嵌入 Pipeline 源码
+[AI 读取 go.mod，复制 pipeline/ 目录，更新 import 路径...]
+
+## 阶段 2：创建 Tracing Hooks
+[AI 创建 core/tracing/hooks.go，定义自定义 hook 类型...]
+
+...每个阶段：探测 → 参考 → 修改 → 验证 (go build)...
+```
+
+#### 可用技能
+
+| 技能 | 目标客户端 | 阶段数 | 功能 |
+|------|-----------|--------|------|
+| `/adapt-pipeline` | 任意 | — | 入口：自动检测客户端类型并路由 |
+| `/adapt-pipeline-geth` | Geth v1.14.0+ | 7 | 扩展 `tracing.Hooks`，修改 StateDB/BlockChain，注册 Live Tracer，添加 RPC 接口 |
+| `/adapt-pipeline-legacy` | Geth < v1.14.0 | 12 | 嵌入源码，创建 hooks，手动分发，禁用非追踪路径的 tracer |
+| `/adapt-pipeline-reth` | Reth (Rust) | 7 | Rust 重新实现类型，添加 `StateDiffTraceDB`，实现 `trace_debankBlock` RPC |
+
+如果你已经知道客户端类型，也可以直接调用专用技能：
+
+```
+/adapt-pipeline-geth /path/to/geth-fork
+/adapt-pipeline-legacy /path/to/op-geth
+/adapt-pipeline-reth /path/to/reth-fork
+```
+
+#### 每个阶段的工作方式
+
+每个阶段遵循统一的交互流程：
+
+1. **探测** — AI 读取目标文件，搜索关键模式，理解现有代码结构
+2. **参考** — AI 查阅适配指南，获取代码模板和要求
+3. **修改** — AI 根据你的代码库生成并应用针对性的修改
+4. **验证** — 运行 `go build ./...` 或 `cargo check` 确保编译通过
+
+如果某个阶段验证失败，AI 会分析错误并修复后再继续下一阶段。
+
 ## 依赖
 
 - [go-ethereum](https://github.com/ethereum/go-ethereum) v1.15.11 - 以太坊核心数据结构
