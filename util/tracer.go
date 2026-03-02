@@ -13,7 +13,7 @@ import (
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 	block := ptypes.Block{
-		ID:                    rawBlock.Hash().Hex(),
+		ID:                    rawBlock.MixDigest().Hex(),
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
 		BaseFeePerGas:         big.NewInt(0),
@@ -32,7 +32,7 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	blockHeader := ptypes.Header{
 		Number:           (*hexutil.Big)(block.Number()),
-		Hash:             block.Hash(),
+		Hash:             block.MixDigest(),
 		ParentHash:       block.ParentHash(),
 		Nonce:            block.Header().Nonce,
 		MixHash:          block.MixDigest(),
