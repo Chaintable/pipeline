@@ -305,7 +305,11 @@ func setParentFailed(cf *callFrame, parentFailed bool) {
 
 func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}) {
 	if cf.To != nil && cf.SelfStorageChange {
-		ChangeContracts[*cf.To] = struct{}{}
+		if cf.Type == vm.DELEGATECALL {
+			ChangeContracts[cf.From] = struct{}{}
+		} else {
+			ChangeContracts[*cf.To] = struct{}{}
+		}
 	}
 	subCallStorageChange := false
 	for i := range cf.Calls {
@@ -336,7 +340,7 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 		}
 	}
 	for i := range cf.Calls {
-		if cf.failed() || cf.ParentFailed {
+		if cf.Calls[i].failed() {
 			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		} else {
 			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
