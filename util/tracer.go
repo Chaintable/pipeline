@@ -23,6 +23,9 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		Timestamp:             rawBlock.Time().Uint64(),
 		ProcessStartTimestamp: time.Now().UnixMilli(),
 	}
+	if rawBlock.Header().BaseFee != nil {
+		block.BaseFeePerGas = rawBlock.Header().BaseFee
+	}
 	return block
 }
 
