@@ -6,9 +6,9 @@ import (
 	"time"
 
 	ptypes "github.com/Chaintable/pipeline/types"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum-optimism/optimism/l2geth/common"
+	"github.com/ethereum-optimism/optimism/l2geth/common/hexutil"
+	"github.com/ethereum-optimism/optimism/l2geth/core/types"
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
@@ -22,9 +22,6 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
 		Timestamp:             rawBlock.Time(),
 		ProcessStartTimestamp: time.Now().UnixMilli(),
-	}
-	if rawBlock.Header().BaseFee != nil {
-		block.BaseFeePerGas = rawBlock.Header().BaseFee
 	}
 	return block
 }
@@ -48,24 +45,6 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 		TransactionsRoot: block.TxHash(),
 		ReceiptsRoot:     block.ReceiptHash(),
 	}
-	if block.Header().BaseFee != nil {
-		blockHeader.BaseFeePerGas = (*hexutil.Big)(block.Header().BaseFee)
-	}
-	if block.Header().WithdrawalsHash != nil {
-		blockHeader.WithdrawalsRoot = block.Header().WithdrawalsHash
-	}
-	if block.Header().BlobGasUsed != nil {
-		blockHeader.BlobGasUsed = (*hexutil.Uint64)(block.Header().BlobGasUsed)
-	}
-	if block.Header().ExcessBlobGas != nil {
-		blockHeader.ExcessBlobGas = (*hexutil.Uint64)(block.Header().ExcessBlobGas)
-	}
-	if block.Header().ParentBeaconRoot != nil {
-		blockHeader.ParentBeaconBlockRoot = block.Header().ParentBeaconRoot
-	}
-	if block.Header().RequestsHash != nil {
-		blockHeader.RequestsRoot = block.Header().RequestsHash
-	}
 	return &blockHeader
 }
 
@@ -74,16 +53,12 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	if tx.To() != nil {
 		to = *tx.To()
 	}
-	gasPrice := receipt.EffectiveGasPrice
-	if gasPrice == nil {
-		gasPrice = tx.GasPrice()
-	}
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
 		From:             strings.ToLower(from.Hex()),
 		To:               strings.ToLower(to.Hex()),
 		Gas:              big.NewInt(int64(tx.Gas())),
-		GasPrice:         gasPrice,
+		GasPrice:         tx.GasPrice(),
 		GasUsed:          big.NewInt(int64(receipt.GasUsed)),
 		Status:           receipt.Status == types.ReceiptStatusSuccessful,
 		GasFeeCap:        common.Big0,
@@ -92,11 +67,6 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		Nonce:            big.NewInt(int64(tx.Nonce())),
 		TransactionIndex: int64(receipt.TransactionIndex),
 		Value:            (*hexutil.Big)(tx.Value()),
-	}
-	switch tx.Type() {
-	case types.DynamicFeeTxType, types.BlobTxType, types.SetCodeTxType:
-		transaction.GasFeeCap = tx.GasFeeCap()
-		transaction.GasTipCap = tx.GasTipCap()
 	}
 	return transaction
 }

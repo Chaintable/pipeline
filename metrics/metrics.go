@@ -1,7 +1,7 @@
 package metrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum-optimism/optimism/l2geth/metrics"
 )
 
 var (
@@ -10,8 +10,6 @@ var (
 	LatestBlockTime = metrics.NewRegisteredGauge("pipeline/block_time", nil)
 
 	LatestUploadedBlockNumber = metrics.NewRegisteredGauge("pipeline/latest_uploaded_block_number", nil)
-
-	NodeInfo = metrics.NewRegisteredGaugeInfo("pipeline/node_info", nil)
 
 	BlockProcessTimer = metrics.NewRegisteredResettingTimer("pipeline/block_process", nil)
 

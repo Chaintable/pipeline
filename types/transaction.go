@@ -3,7 +3,7 @@ package types
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum-optimism/optimism/l2geth/common/hexutil"
 )
 
 type Transaction struct {

@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/Chaintable/pipeline/leader"
@@ -9,11 +10,12 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/writer"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum-optimism/optimism/l2geth/common"
+	"github.com/ethereum-optimism/optimism/l2geth/core"
+	"github.com/ethereum-optimism/optimism/l2geth/core/types"
+	"github.com/ethereum-optimism/optimism/l2geth/crypto"
+	"github.com/ethereum-optimism/optimism/l2geth/log"
+	"github.com/ethereum-optimism/optimism/l2geth/rlp"
 	"github.com/holiman/uint256"
 )
 
@@ -137,18 +139,51 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	return nil
 }
 
-func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
+// decodeSlimAccount decodes RLP-encoded slim account data
+// Replaces snapshot.FullAccount() which is not available in l2geth
+func decodeSlimAccount(data []byte) (nonce uint64, balance *big.Int, root common.Hash, codeHash []byte, err error) {
+	var account struct {
+		Nonce    uint64
+		Balance  *big.Int
+		Root     []byte
+		CodeHash []byte
+	}
+	if err := rlp.DecodeBytes(data, &account); err != nil {
+		return 0, nil, common.Hash{}, nil, err
+	}
+
+	// Handle empty values
+	if len(account.Root) == 0 {
+		root = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421") // emptyRoot
+	} else {
+		root = common.BytesToHash(account.Root)
+	}
+
+	if len(account.CodeHash) == 0 {
+		codeHash = crypto.Keccak256(nil) // emptyCode
+	} else {
+		codeHash = account.CodeHash
+	}
+
+	return account.Nonce, account.Balance, root, codeHash, nil
+}
+
+func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
 	stateDiff := &ptypes.BlockStorageDiff{}
 	for addrhash := range destructs {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		nonce, balance, _, codeHash, err := decodeSlimAccount(v)
+		if err != nil {
+			log.Error("Failed to decode slim account", "err", err)
+			continue
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
-			Nonce:    uint64(account.Nonce),
-			CodeHash: common.BytesToHash(account.CodeHash),
+			Balance:  uint256.MustFromBig(balance),
+			Nonce:    nonce,
+			CodeHash: common.BytesToHash(codeHash),
 		})
 	}
 	for account, storage := range storages {
@@ -189,7 +224,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
-func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
+func GenesisAllocToStateDiff(genesisAlloc core.GenesisAlloc) *ptypes.BlockStorageDiff {
 	diff := &ptypes.BlockStorageDiff{}
 	diff.NewAccounts = make([]ptypes.NewAccount, 0)
 	diff.NewCodes = make([]ptypes.NewCode, 0)
@@ -200,11 +235,11 @@ func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStora
 			Address:  crypto.Keccak256Hash(addr[:]),
 			Balance:  uint256.MustFromBig(acc.Balance),
 			Nonce:    acc.Nonce,
-			CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
+			CodeHash: crypto.Keccak256Hash(acc.Code),
 		})
 		if len(acc.Code) > 0 {
 			diff.NewCodes = append(diff.NewCodes, ptypes.NewCode{
-				CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
+				CodeHash: crypto.Keccak256Hash(acc.Code),
 				Code:     acc.Code,
 			})
 		}
