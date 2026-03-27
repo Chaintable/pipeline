@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Chaintable/pipeline/types"
 	"github.com/segmentio/kafka-go"
@@ -19,9 +20,15 @@ func NewKafkaReader(brokers []string, topic string, groupID string) *kafka.Reade
 
 // 获取最后一个BlockChangeNotification
 func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	reader.SetOffset(0)
-	lag, err := reader.ReadLag(context.Background())
+	lag, err := reader.ReadLag(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			panic("GetLastBlockNotice timeout on ReadLag")
+		}
 		return nil, err
 	}
 	if lag == 0 {
@@ -33,8 +40,11 @@ func GetLastBlockNotice(reader *kafka.Reader) (*types.BlockChangeNotification, e
 		return nil, err
 	}
 
-	msg, err := reader.ReadMessage(context.Background())
+	msg, err := reader.ReadMessage(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			panic("GetLastBlockNotice timeout on ReadMessage")
+		}
 		return nil, err
 	}
 
