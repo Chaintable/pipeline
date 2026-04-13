@@ -26,6 +26,7 @@ type RPCBlockContext struct {
 	Tx              *types.Transaction
 	From            common.Address
 	ChangeContracts map[common.Address]struct{}
+	TxHashOverride  string // if set, overrides tx.ID in OnTxEnd
 }
 
 func (t *RPCTracer) Stop(err error) {
@@ -65,6 +66,15 @@ func (t *RPCTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	}
 }
 
+// SetTxHash overrides the tx hash used for trace IDs and tx.ID.
+// Used by IoTeX to set the native action hash instead of geth RLP hash.
+func (t *RPCTracer) SetTxHash(hash string) {
+	if t.callTracer != nil {
+		t.callTracer.txID = hash
+	}
+	t.currentBlock.TxHashOverride = hash
+}
+
 func (t *RPCTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.OnOpcode(pc, opcode, gas, cost, scope, rData, depth, err)
@@ -84,6 +94,10 @@ func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer = nil
 
 	tx := util.BuildPipelineTransaction(t.currentBlock.Tx, receipt, t.currentBlock.From, t.currentBlock.BlockHeader.BaseFeePerGas.ToInt())
+	if t.currentBlock.TxHashOverride != "" {
+		tx.ID = t.currentBlock.TxHashOverride
+		t.currentBlock.TxHashOverride = ""
+	}
 	t.currentBlock.BlockFile.Txs = append(t.currentBlock.BlockFile.Txs, tx)
 }
 
