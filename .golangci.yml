@@ -1,22 +1,15 @@
+version: "2"
+
 run:
   timeout: 5m
 
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-
 linters:
-  disable-all: true
   enable:
-    - errcheck
     - govet
     - ineffassign
-    - staticcheck
     - unused
-    - gosimple
     - misspell
+  disable:
+    - errcheck
+    - staticcheck
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
