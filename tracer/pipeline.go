@@ -12,6 +12,7 @@ import (
 	"github.com/Chaintable/pipeline/writer"
 	"github.com/ethereum-optimism/optimism/l2geth/common"
 	"github.com/ethereum-optimism/optimism/l2geth/core"
+	"github.com/ethereum-optimism/optimism/l2geth/core/state"
 	"github.com/ethereum-optimism/optimism/l2geth/core/types"
 	"github.com/ethereum-optimism/optimism/l2geth/crypto"
 	"github.com/ethereum-optimism/optimism/l2geth/log"
@@ -256,6 +257,54 @@ func GenesisAllocToStateDiff(genesisAlloc core.GenesisAlloc) *ptypes.BlockStorag
 		}
 		diff.StorageDiff = append(diff.StorageDiff, ptypes.AccountStorageDiff{
 			Address: crypto.Keccak256Hash(addr[:]),
+			Values:  values,
+		})
+	}
+	return diff
+}
+
+func GenesisDumpToStateDiff(dump state.Dump) *ptypes.BlockStorageDiff {
+	diff := &ptypes.BlockStorageDiff{}
+	diff.NewAccounts = make([]ptypes.NewAccount, 0, len(dump.Accounts))
+	diff.NewCodes = make([]ptypes.NewCode, 0)
+	diff.StorageDiff = make([]ptypes.AccountStorageDiff, 0, len(dump.Accounts))
+	diff.DeletedAccounts = make([]common.Hash, 0)
+
+	for addr, acc := range dump.Accounts {
+		addrHash := crypto.Keccak256Hash(addr[:])
+
+		balance := uint256.MustFromDecimal(acc.Balance)
+
+		codeBytes := common.Hex2Bytes(acc.Code)
+		codeHash := crypto.Keccak256Hash(codeBytes)
+
+		diff.NewAccounts = append(diff.NewAccounts, ptypes.NewAccount{
+			Address:  addrHash,
+			Balance:  balance,
+			Nonce:    acc.Nonce,
+			CodeHash: codeHash,
+		})
+
+		if len(acc.Code) > 0 {
+			diff.NewCodes = append(diff.NewCodes, ptypes.NewCode{
+				CodeHash: codeHash,
+				Code:     codeBytes,
+			})
+		}
+
+		values := make([]ptypes.IndexValuePair, 0, len(acc.Storage))
+		for index, v := range acc.Storage {
+			value := uint256.NewInt(0)
+			if len(v) > 0 {
+				value = uint256.NewInt(0).SetBytes(common.Hex2Bytes(v))
+			}
+			values = append(values, ptypes.IndexValuePair{
+				Index: crypto.Keccak256Hash(index[:]),
+				Value: value,
+			})
+		}
+		diff.StorageDiff = append(diff.StorageDiff, ptypes.AccountStorageDiff{
+			Address: addrHash,
 			Values:  values,
 		})
 	}
