@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.28.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.66.3
 	github.com/aws/smithy-go v1.22.1
-	github.com/ethereum-optimism/optimism/l2geth v0.0.0-20241211115232-fb3fdbe35172
+	github.com/mantlenetworkio/mantle/l2geth v0.0.0-20250425000000-5cda5f811f73
 	github.com/holiman/uint256 v1.3.2
 	github.com/klauspost/compress v1.17.11
 	github.com/segmentio/kafka-go v0.4.47
@@ -74,4 +74,4 @@ require (
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )
 
-replace github.com/ethereum-optimism/optimism/l2geth => github.com/DeBankDeFi/optimism/l2geth v0.0.0-20241211115232-fb3fdbe35172
+replace github.com/mantlenetworkio/mantle/l2geth => github.com/Chaintable/mantle/l2geth v0.0.0-20250425000000-5cda5f811f73

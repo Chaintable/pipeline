@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/Chaintable/pipeline/types"
-	"github.com/ethereum-optimism/optimism/l2geth/common"
+	"github.com/mantlenetworkio/mantle/l2geth/common"
 )
 
 func TestKafkaReader(t *testing.T) {

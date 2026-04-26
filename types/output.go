@@ -1,6 +1,6 @@
 package types
 
-import "github.com/ethereum-optimism/optimism/l2geth/common/hexutil"
+import "github.com/mantlenetworkio/mantle/l2geth/common/hexutil"
 
 type DebankOutPut struct {
 	BlockFile      *BlockFile    `json:"block_file"`

@@ -3,7 +3,7 @@ package types
 import (
 	"math/big"
 
-	"github.com/ethereum-optimism/optimism/l2geth/common/hexutil"
+	"github.com/mantlenetworkio/mantle/l2geth/common/hexutil"
 )
 
 // id = to_hash(trace['tx_id'], trace['parent_trace_id'], trace['pos_in_parent_trace'])

@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/ethereum-optimism/optimism/l2geth/common"
+	"github.com/mantlenetworkio/mantle/l2geth/common"
 )
 
 type BlockChangeNotification struct {
