@@ -300,10 +300,6 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 		}
 	}
 
-	if p.LastPushedBlock() == nil && blockNotice.NewBlocks[0].BlockNumber != 0 {
-		return fmt.Errorf("last pushed block is empty but new block number is not 0")
-	}
-
 	if p.LastPushedBlock() != nil &&
 		(p.LastPushedBlock().BlockNumber >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber) {
 		return nil
