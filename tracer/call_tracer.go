@@ -175,7 +175,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
 		Gas:   t.gasLimit,
-		Value: value,
+		Value: new(big.Int).Set(value),
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -190,13 +190,17 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, _ time.Duration, 
 
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
+	var valueCopy *big.Int
+	if value != nil {
+		valueCopy = new(big.Int).Set(value)
+	}
 	call := callFrame{
 		Type:  typ,
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
 		Gas:   gas,
-		Value: value,
+		Value: valueCopy,
 	}
 	t.callstack = append(t.callstack, call)
 }
