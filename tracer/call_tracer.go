@@ -105,6 +105,12 @@ type callTracer struct {
 
 	ChangeContracts map[common.Address]struct{}
 	BlockFile       *ptypes.BlockFile
+
+	// inTxLogIdx counts logs within the current tx (resets on OnTxStart).
+	// Stamped onto every Event in OnLog so canonical-events rebuild can bind
+	// by (txID, InTxLogIdx) instead of the global LogIndex, which is not in
+	// sync with iotex receipt-side log.Index allocation.
+	inTxLogIdx int64
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
@@ -228,6 +234,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+	t.inTxLogIdx = 0
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -275,13 +282,15 @@ func (t *callTracer) OnLog(log *types.Log) {
 	}
 
 	l := ptypes.Event{
-		Address:  strings.ToLower(log.Address.Hex()),
-		Selector: selector,
-		Topics:   remainingTopics,
-		Data:     log.Data,
-		Position: position,
-		LogIndex: int64(log.Index),
+		Address:    strings.ToLower(log.Address.Hex()),
+		Selector:   selector,
+		Topics:     remainingTopics,
+		Data:       log.Data,
+		Position:   position,
+		LogIndex:   int64(log.Index),
+		InTxLogIdx: t.inTxLogIdx,
 	}
+	t.inTxLogIdx++
 
 	if len(t.callstack) > 0 {
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
