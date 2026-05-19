@@ -106,6 +106,11 @@ type callTracer struct {
 	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
 
 	txID string
+	// inTxLogIdx counts logs within the current tx (resets on OnTxStart).
+	// Stamped onto every Event in OnLog so canonical-events rebuild can bind
+	// by (txID, InTxLogIdx) instead of the global LogIndex, which is not in
+	// sync with iotex receipt-side log.Index allocation.
+	inTxLogIdx int64
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
@@ -241,6 +246,7 @@ func (t *callTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sco
 func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+	t.inTxLogIdx = 0
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -284,13 +290,15 @@ func (t *callTracer) OnLog(log *types.Log) {
 
 	// todo(lihe) 这里的逻辑有分叉，为什么
 	l := ptypes.Event{
-		Address:  strings.ToLower(log.Address.Hex()),
-		Selector: selector,
-		Topics:   remainingTopics,
-		Data:     log.Data,
-		Position: int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
-		LogIndex: int64(log.Index),
+		Address:    strings.ToLower(log.Address.Hex()),
+		Selector:   selector,
+		Topics:     remainingTopics,
+		Data:       log.Data,
+		Position:   int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
+		LogIndex:   int64(log.Index),
+		InTxLogIdx: t.inTxLogIdx,
 	}
+	t.inTxLogIdx++
 	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
 }
 
