@@ -111,6 +111,14 @@ type callTracer struct {
 	// by (txID, InTxLogIdx) instead of the global LogIndex, which is not in
 	// sync with iotex receipt-side log.Index allocation.
 	inTxLogIdx int64
+
+	// pendingLogsOnTopParent is set by deferred-flush callers (e.g. iotex's
+	// buffered tracer) right before CaptureExit, to inform PosInParentTrace
+	// that N logs have already been emitted on the popping frame's parent
+	// even though they haven't been physically inserted into parent.Logs yet
+	// (they're sitting in the caller's pendingLogs buffer waiting for flush).
+	// Consumed (used + reset to 0) on the next CaptureExit.
+	pendingLogsOnTopParent int
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
@@ -229,8 +237,26 @@ func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 
 	call.GasUsed = usedGas
 	call.processOutput(output, err, err != nil)
-	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
+	// PosInParentTrace is the position of this sub-call in the parent frame's
+	// calls+logs interleaved sequence. With a deferred-flush caller (iotex
+	// buffered tracer) parent.Logs is still empty at this point — the logs
+	// emitted on parent before this CaptureExit are sitting in the caller's
+	// pendingLogs buffer. The caller informs us via SetPendingLogsOnTopParent
+	// so the position reflects the true interleaved order. For non-buffered
+	// callers the field stays 0 and behavior is unchanged.
+	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs) + t.pendingLogsOnTopParent
+	t.pendingLogsOnTopParent = 0
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
+}
+
+// SetPendingLogsOnTopParent records how many logs have already been emitted
+// on the currently popping frame's parent but not yet physically inserted
+// via InsertLog (because the caller is buffering them for deferred flush).
+// Must be called immediately before each CaptureExit; the value is consumed
+// (used + reset to 0) by CaptureExit. Calling without a matching CaptureExit
+// has no effect on subsequent calls because consume resets to 0.
+func (t *callTracer) SetPendingLogsOnTopParent(n int) {
+	t.pendingLogsOnTopParent = n
 }
 
 func (*callTracer) CaptureTxStart(gasLimit uint64) {
