@@ -171,3 +171,91 @@ func TestCallTracer_InsertLog(t *testing.T) {
 		})
 	})
 }
+
+// TestCallTracer_PosInParentTraceWithPendingLogs verifies the
+// SetPendingLogsOnTopParent + CaptureExit interaction.
+//
+// Scenario (from real prod tx, ad1f3743... block 48348301): a parent frame
+// emits a log BEFORE entering a sub-call. With deferred-flush buffering,
+// callTracer.frame.Logs is empty when sub-call's CaptureExit fires, so
+// without the pending-logs hint PosInParentTrace would compute as 0 and
+// collide with the buffered log's own position (also 0). SetPendingLogsOnTopParent
+// supplies the missing count so PosInParentTrace correctly reflects the
+// interleaved order.
+func TestCallTracer_PosInParentTraceWithPendingLogs(t *testing.T) {
+	bf := &ptypes.BlockFile{}
+	ct := newCallTracerRaw(make(map[common.Address]struct{}), bf)
+	addr := func(h string) common.Address { return common.HexToAddress(h) }
+	gas := uint64(100000)
+	zero := big.NewInt(0)
+
+	// Build: root with 1 log emitted before 2 sub-calls.
+	ct.CaptureStart(nil, addr("0xA"), addr("0xB"), false, []byte("root"), gas, zero)
+
+	// In the real flow, the log would go through OnLog → pendingLogs → InsertLog
+	// after CaptureExit. Here we simulate the deferred-flush behaviour: the
+	// log isn't inserted yet, but the caller (iotex tracer) remembers it
+	// happened by tracking logCount=1.
+	pendingOnRoot := 1
+
+	// Enter+Exit sub[0]. Caller informs us 1 log has fired on parent first.
+	ct.CaptureEnter(vm.CALL, addr("0xB"), addr("0xC"), []byte("c0"), gas, zero)
+	ct.SetPendingLogsOnTopParent(pendingOnRoot)
+	ct.CaptureExit([]byte("c0_out"), 100, nil)
+
+	// Enter+Exit sub[1]. Caller still has 1 log pending on root.
+	ct.CaptureEnter(vm.CALL, addr("0xB"), addr("0xD"), []byte("c1"), gas, zero)
+	ct.SetPendingLogsOnTopParent(pendingOnRoot)
+	ct.CaptureExit([]byte("c1_out"), 100, nil)
+
+	ct.CaptureEnd([]byte("root_out"), 1000, nil)
+
+	// Finally the deferred flush: InsertLog with pos=0 (the position assigned
+	// at OnLog time when childCount+logCount = 0 + 0).
+	logA := &types.Log{Address: addr("0xee")}
+	ct.InsertLog([]int64{}, 0, logA)
+
+	require.Len(t, ct.callstack[0].Calls, 2)
+	// Expected interleaved positions (callTracer.go:232 semantics with pending):
+	//   sub[0].PosInParentTrace = len(Calls)=0 + len(Logs)=0 + pending(1) = 1
+	//   sub[1].PosInParentTrace = len(Calls)=1 + len(Logs)=0 + pending(1) = 2
+	// And the log itself was already assigned pos=0 by the caller.
+	require.Equal(t, 1, ct.callstack[0].Calls[0].PosInParentTrace, "sub[0] takes pos after the earlier log")
+	require.Equal(t, 2, ct.callstack[0].Calls[1].PosInParentTrace, "sub[1] takes pos after sub[0] + the earlier log")
+	require.Len(t, ct.callstack[0].Logs, 1)
+	require.Equal(t, int64(0), ct.callstack[0].Logs[0].Position, "log assigned pos=0 at OnLog time")
+
+	// Aggregate: positions {sub[0]=1, sub[1]=2, log=0} cover {0,1,2} with no duplicates.
+	positions := []int{
+		int(ct.callstack[0].Logs[0].Position),
+		ct.callstack[0].Calls[0].PosInParentTrace,
+		ct.callstack[0].Calls[1].PosInParentTrace,
+	}
+	require.ElementsMatch(t, []int{0, 1, 2}, positions, "positions must be a contiguous unique 0..N-1")
+}
+
+// TestCallTracer_PendingLogsResetAfterConsume verifies that pendingLogsOnTopParent
+// is consumed exactly once per CaptureExit and resets to 0, so a single
+// SetPendingLogsOnTopParent doesn't bleed into subsequent unrelated CaptureExits.
+func TestCallTracer_PendingLogsResetAfterConsume(t *testing.T) {
+	bf := &ptypes.BlockFile{}
+	ct := newCallTracerRaw(make(map[common.Address]struct{}), bf)
+	addr := func(h string) common.Address { return common.HexToAddress(h) }
+	gas := uint64(100000)
+	zero := big.NewInt(0)
+
+	ct.CaptureStart(nil, addr("0xA"), addr("0xB"), false, []byte("root"), gas, zero)
+
+	// Set pending=5 then exit. Should consume.
+	ct.CaptureEnter(vm.CALL, addr("0xB"), addr("0xC"), []byte("c0"), gas, zero)
+	ct.SetPendingLogsOnTopParent(5)
+	ct.CaptureExit(nil, 0, nil)
+	require.Equal(t, 5, ct.callstack[0].Calls[0].PosInParentTrace)
+
+	// Next CaptureExit WITHOUT a Set call should use pending=0.
+	ct.CaptureEnter(vm.CALL, addr("0xB"), addr("0xD"), []byte("c1"), gas, zero)
+	ct.CaptureExit(nil, 0, nil)
+	require.Equal(t, 1, ct.callstack[0].Calls[1].PosInParentTrace, "no pending → use len(Calls)+len(Logs)=1 only")
+
+	ct.CaptureEnd(nil, 0, nil)
+}
