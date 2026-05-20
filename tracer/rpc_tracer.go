@@ -107,6 +107,17 @@ func (t *RPCTracer) OnLog(log *types.Log) {
 	}
 }
 
+// InsertLog forwards to callTracer.InsertLog. See callTracer.InsertLog for the
+// caller contract (callstack must still contain the root frame, traceAddress
+// must point to a frame whose CaptureExit has already finalized it into its
+// parent.Calls, position must be the OnLog-time snapshot).
+func (t *RPCTracer) InsertLog(traceAddress []int64, position int64, l *types.Log) {
+	if t.callTracer != nil {
+		t.callTracer.InsertLog(traceAddress, position, l)
+	}
+}
+
+// GetOutPut builds the final DebankOutPut from collected traces and state diff.
 func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.DebankOutPut {
 	if originRoot != root {
 		t.currentBlock.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, nil, storages, nil, codes)
