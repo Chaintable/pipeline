@@ -234,6 +234,29 @@ func TestCallTracer_PosInParentTraceWithPendingLogs(t *testing.T) {
 	require.ElementsMatch(t, []int{0, 1, 2}, positions, "positions must be a contiguous unique 0..N-1")
 }
 
+// TestCallTracer_PendingLogsResetOnOrphanExit verifies that an orphan
+// CaptureExit (no matching Enter, callstack size <= 1) still consumes the
+// caller-set pendingLogsOnTopParent so it doesn't leak into the next
+// legitimate CaptureExit. Without this, a misbehaving caller path that
+// pairs Set+Exit when there's nothing on the stack would corrupt the
+// PosInParentTrace of a totally unrelated later sub-frame.
+func TestCallTracer_PendingLogsResetOnOrphanExit(t *testing.T) {
+	bf := &ptypes.BlockFile{}
+	ct := newCallTracerRaw(make(map[common.Address]struct{}), bf)
+	addr := func(h string) common.Address { return common.HexToAddress(h) }
+
+	// Orphan path: Set + Exit when callstack is empty.
+	ct.SetPendingLogsOnTopParent(42)
+	ct.CaptureExit(nil, 0, nil) // size<=1 → early return, must still reset
+
+	// Now run a normal sub-call. The leftover 42 must NOT contaminate this.
+	ct.CaptureStart(nil, addr("0xA"), addr("0xB"), false, nil, 0, big.NewInt(0))
+	ct.CaptureEnter(vm.CALL, addr("0xB"), addr("0xC"), nil, 0, big.NewInt(0))
+	ct.CaptureExit(nil, 0, nil)
+	require.Equal(t, 0, ct.callstack[0].Calls[0].PosInParentTrace,
+		"leftover pendingLogsOnTopParent=42 must have been cleared by orphan exit")
+}
+
 // TestCallTracer_PendingLogsResetAfterConsume verifies that pendingLogsOnTopParent
 // is consumed exactly once per CaptureExit and resets to 0, so a single
 // SetPendingLogsOnTopParent doesn't bleed into subsequent unrelated CaptureExits.

@@ -228,6 +228,10 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.
 func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	size := len(t.callstack)
 	if size <= 1 {
+		// Orphan CaptureExit (no matching Enter). Must still consume the
+		// caller-set pending logs hint so it doesn't leak into the NEXT
+		// legitimate CaptureExit, where it would corrupt PosInParentTrace.
+		t.pendingLogsOnTopParent = 0
 		return
 	}
 	// Pop call.
