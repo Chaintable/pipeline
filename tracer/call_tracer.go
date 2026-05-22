@@ -137,6 +137,7 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		CallCreateType = strings.ToLower(vm.CREATE.String())
 	case vm.SELFDESTRUCT:
 		CallCreateType = "suicide"
+		CallType = strings.ToLower(f.Type.String())
 	case vm.CALL, vm.STATICCALL, vm.CALLCODE, vm.DELEGATECALL:
 		CallCreateType = strings.ToLower(vm.CALL.String())
 		CallType = strings.ToLower(f.Type.String())
