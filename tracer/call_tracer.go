@@ -106,6 +106,19 @@ type callTracer struct {
 	BlockFile       *ptypes.BlockFile // Block file to store traces and logs
 
 	txID string
+	// inTxLogIdx counts logs within the current tx (resets on OnTxStart).
+	// Stamped onto every Event in OnLog so canonical-events rebuild can bind
+	// by (txID, InTxLogIdx) instead of the global LogIndex, which is not in
+	// sync with iotex receipt-side log.Index allocation.
+	inTxLogIdx int64
+
+	// pendingLogsOnTopParent is set by deferred-flush callers (e.g. iotex's
+	// buffered tracer) right before CaptureExit, to inform PosInParentTrace
+	// that N logs have already been emitted on the popping frame's parent
+	// even though they haven't been physically inserted into parent.Logs yet
+	// (they're sitting in the caller's pendingLogs buffer waiting for flush).
+	// Consumed (used + reset to 0) on the next CaptureExit.
+	pendingLogsOnTopParent int
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
@@ -124,6 +137,7 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		CallCreateType = strings.ToLower(vm.CREATE.String())
 	case vm.SELFDESTRUCT:
 		CallCreateType = "suicide"
+		CallType = strings.ToLower(f.Type.String())
 	case vm.CALL, vm.STATICCALL, vm.CALLCODE, vm.DELEGATECALL:
 		CallCreateType = strings.ToLower(vm.CALL.String())
 		CallType = strings.ToLower(f.Type.String())
@@ -215,6 +229,10 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.
 func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	size := len(t.callstack)
 	if size <= 1 {
+		// Orphan CaptureExit (no matching Enter). Must still consume the
+		// caller-set pending logs hint so it doesn't leak into the NEXT
+		// legitimate CaptureExit, where it would corrupt PosInParentTrace.
+		t.pendingLogsOnTopParent = 0
 		return
 	}
 	// Pop call.
@@ -224,8 +242,26 @@ func (t *callTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 
 	call.GasUsed = usedGas
 	call.processOutput(output, err, err != nil)
-	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
+	// PosInParentTrace is the position of this sub-call in the parent frame's
+	// calls+logs interleaved sequence. With a deferred-flush caller (iotex
+	// buffered tracer) parent.Logs is still empty at this point — the logs
+	// emitted on parent before this CaptureExit are sitting in the caller's
+	// pendingLogs buffer. The caller informs us via SetPendingLogsOnTopParent
+	// so the position reflects the true interleaved order. For non-buffered
+	// callers the field stays 0 and behavior is unchanged.
+	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs) + t.pendingLogsOnTopParent
+	t.pendingLogsOnTopParent = 0
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
+}
+
+// SetPendingLogsOnTopParent records how many logs have already been emitted
+// on the currently popping frame's parent but not yet physically inserted
+// via InsertLog (because the caller is buffering them for deferred flush).
+// Must be called immediately before each CaptureExit; the value is consumed
+// (used + reset to 0) by CaptureExit. Calling without a matching CaptureExit
+// has no effect on subsequent calls because consume resets to 0.
+func (t *callTracer) SetPendingLogsOnTopParent(n int) {
+	t.pendingLogsOnTopParent = n
 }
 
 func (*callTracer) CaptureTxStart(gasLimit uint64) {
@@ -241,6 +277,7 @@ func (t *callTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sco
 func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+	t.inTxLogIdx = 0
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -284,14 +321,68 @@ func (t *callTracer) OnLog(log *types.Log) {
 
 	// todo(lihe) 这里的逻辑有分叉，为什么
 	l := ptypes.Event{
-		Address:  strings.ToLower(log.Address.Hex()),
-		Selector: selector,
-		Topics:   remainingTopics,
-		Data:     log.Data,
-		Position: int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
-		LogIndex: int64(log.Index),
+		Address:    strings.ToLower(log.Address.Hex()),
+		Selector:   selector,
+		Topics:     remainingTopics,
+		Data:       log.Data,
+		Position:   int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs)),
+		LogIndex:   int64(log.Index),
+		InTxLogIdx: t.inTxLogIdx,
 	}
+	t.inTxLogIdx++
 	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
+}
+
+// InsertLog inserts a log into the frame identified by traceAddress. Used by
+// the iotex deferred-flush path: a log was OnLog'd during EVM execution at a
+// specific call depth, buffered with a snapshot of its trace_address + position
+// taken at that moment, and now needs to be physically attached to the
+// originating frame so OnTxEnd's addTraceAndLog walks it under the correct
+// sub-frame instead of the root.
+//
+// Caller contract: callstack[0] (root) is still present and every intermediate
+// frame along traceAddress has been CaptureExit'd into its parent.Calls. The
+// position field is pre-computed by the caller at OnLog time (calls+logs count
+// in the originating frame at that exact moment) and is NOT recomputed here,
+// because frame.Calls/Logs counts at flush time differ from the OnLog moment.
+//
+// Invalid traceAddress (index out of bounds) is silently dropped — should not
+// happen in practice; serves as a safety net for stack-imbalance edge cases.
+func (t *callTracer) InsertLog(traceAddress []int64, position int64, log *types.Log) {
+	if t.interrupt.Load() {
+		return
+	}
+	if len(t.callstack) < 1 {
+		return
+	}
+	frame := &t.callstack[0]
+	for _, i := range traceAddress {
+		if int(i) < 0 || int(i) >= len(frame.Calls) {
+			return
+		}
+		frame = &frame.Calls[i]
+	}
+	topics := make([]string, len(log.Topics))
+	for i, topic := range log.Topics {
+		topics[i] = topic.Hex()
+	}
+	var selector string
+	var remainingTopics []string
+	if len(topics) > 0 {
+		selector = topics[0]
+		remainingTopics = topics[1:]
+	}
+	event := ptypes.Event{
+		Address:    strings.ToLower(log.Address.Hex()),
+		Selector:   selector,
+		Topics:     remainingTopics,
+		Data:       log.Data,
+		Position:   position,
+		LogIndex:   int64(log.Index),
+		InTxLogIdx: t.inTxLogIdx,
+	}
+	t.inTxLogIdx++
+	frame.Logs = append(frame.Logs, event)
 }
 
 func (t *callTracer) GetResult() (json.RawMessage, error) {
