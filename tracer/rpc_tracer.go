@@ -26,6 +26,7 @@ type RPCBlockContext struct {
 	Tx              *types.Transaction
 	From            common.Address
 	ChangeContracts map[common.Address]struct{}
+	TxHashOverride  string // if set, overrides tx.ID in OnTxEnd
 }
 
 func (t *RPCTracer) Stop(err error) {
@@ -65,6 +66,15 @@ func (t *RPCTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, 
 	}
 }
 
+// SetTxHash overrides the tx hash used for trace IDs and tx.ID.
+// Used by IoTeX to set the native action hash instead of geth RLP hash.
+func (t *RPCTracer) SetTxHash(hash string) {
+	if t.callTracer != nil {
+		t.callTracer.txID = hash
+	}
+	t.currentBlock.TxHashOverride = hash
+}
+
 func (t *RPCTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.OnOpcode(pc, opcode, gas, cost, scope, rData, depth, err)
@@ -84,6 +94,10 @@ func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callTracer = nil
 
 	tx := util.BuildPipelineTransaction(t.currentBlock.Tx, receipt, t.currentBlock.From, t.currentBlock.BlockHeader.BaseFeePerGas.ToInt())
+	if t.currentBlock.TxHashOverride != "" {
+		tx.ID = t.currentBlock.TxHashOverride
+		t.currentBlock.TxHashOverride = ""
+	}
 	t.currentBlock.BlockFile.Txs = append(t.currentBlock.BlockFile.Txs, tx)
 }
 
@@ -93,6 +107,27 @@ func (t *RPCTracer) OnLog(log *types.Log) {
 	}
 }
 
+// InsertLog forwards to callTracer.InsertLog. See callTracer.InsertLog for the
+// caller contract (callstack must still contain the root frame, traceAddress
+// must point to a frame whose CaptureExit has already finalized it into its
+// parent.Calls, position must be the OnLog-time snapshot).
+func (t *RPCTracer) InsertLog(traceAddress []int64, position int64, l *types.Log) {
+	if t.callTracer != nil {
+		t.callTracer.InsertLog(traceAddress, position, l)
+	}
+}
+
+// SetPendingLogsOnTopParent forwards to callTracer.SetPendingLogsOnTopParent.
+// Called by deferred-flush tracers (iotex) immediately before CaptureExit to
+// inform PosInParentTrace of buffered-but-not-yet-inserted logs on the
+// popping frame's parent.
+func (t *RPCTracer) SetPendingLogsOnTopParent(n int) {
+	if t.callTracer != nil {
+		t.callTracer.SetPendingLogsOnTopParent(n)
+	}
+}
+
+// GetOutPut builds the final DebankOutPut from collected traces and state diff.
 func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.DebankOutPut {
 	if originRoot != root {
 		t.currentBlock.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, nil, storages, nil, codes)
