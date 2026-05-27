@@ -90,6 +90,19 @@ func (t *RPCTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, fro
 }
 
 func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	// nil guard mirrors v0.0.64-iotex-v2.3.8-debank-1: non-EthCompatibleAction
+	// system actions (PutPollResult / ScheduleCandidateDeactivation /
+	// GrantReward variants whose ToEthTx() isn't wired) reach OnTxEnd
+	// without a paired OnTxStart, leaving callTracer nil. v0.0.65 dropped
+	// the guard; iotex TraceStart's default branch fires OnTxEnd(nil, nil)
+	// synchronously to advance currentIdx for these actions, and the
+	// unguarded forward nil-derefs at callTracer.OnTxEnd's
+	// `setParentFailed(&t.callstack[0], ...)`. Restore the guard so the
+	// synchronous OnTxEnd is a no-op when no callTracer was set up — same
+	// behavior baseline v2.3.8 + pipeline v0.0.64 carried.
+	if t.callTracer == nil {
+		return
+	}
 	t.callTracer.OnTxEnd(receipt, err)
 	t.callTracer = nil
 
