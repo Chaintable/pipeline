@@ -192,14 +192,17 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 			if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
 				strings.Contains(err.Error(), "InternalServerError") {
 				log.Printf("HTTP 500 error detected, retrying in 1 second: %v", err)
-				time.Sleep(time.Second)
-				continue
+			} else {
+				// 任何错误都持续重试，避免上层 panic(err) 把节点搞挂。
+				log.Printf("S3 upload error, retrying in 1 second (attempt %d): %v", times+1, err)
 			}
-			if times > 3 {
-				return err
-			}
-			time.Sleep(time.Second)
+			metrics.S3UploadRetryCounter.Inc(1)
 			times++
+			select {
+			case <-p.quitCh:
+				return nil
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		break
