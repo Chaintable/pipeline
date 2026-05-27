@@ -193,13 +193,23 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		return
 	}
 
+	// For the root frame (depth=0), Gas is the tx-level gas limit snapshotted
+	// at OnTxStart, not the EVM-supplied frame-entry remaining gas. This mirrors
+	// the v1.13 CaptureStart semantics that v0.0.64-iotex-v2.3.8-debank-1
+	// carries, which the iotex double-writer reconciliation depends on. Sub
+	// frames keep using the EVM-supplied gas (matches v1.13 CaptureEnter).
+	frameGas := gas
+	if depth == 0 {
+		frameGas = t.gasLimit
+	}
+
 	toCopy := to
 	call := callFrame{
 		Type:  vm.OpCode(typ),
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
-		Gas:   gas,
+		Gas:   frameGas,
 		Value: value,
 	}
 	t.callstack = append(t.callstack, call)

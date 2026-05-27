@@ -12,8 +12,16 @@ import (
 )
 
 func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
+	// Use MixDigest as the canonical block identifier on iotex: the upstream
+	// iotex fork stores the iotex-native block hash there when synthesizing a
+	// geth-shaped block (see Chaintable/iotex-core-x blockchain.ConvertToGethBlock),
+	// and downstream consumers (leafage / canonical events) bind on the iotex
+	// hash, not on the synthetic geth Header.Hash() that depends on every
+	// auxiliary header field. The v0.0.64-iotex-v2.3.8-debank-1 release carried
+	// this; the v0.0.65 cut was branched from pipeline main and inadvertently
+	// reverted to rawBlock.Hash(). docs/v2.4.1-plan/6-2-test-report.md §3.4.1.
 	block := ptypes.Block{
-		ID:                    rawBlock.Hash().Hex(),
+		ID:                    rawBlock.MixDigest().Hex(),
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
 		BaseFeePerGas:         big.NewInt(0),
@@ -30,9 +38,12 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 }
 
 func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
+	// Hash mirrors BuildPipelineBlock's ID choice: use the iotex-native hash
+	// stored in MixDigest by the fork's ConvertToGethBlock, not the synthetic
+	// geth header hash. See BuildPipelineBlock above for the rationale.
 	blockHeader := ptypes.Header{
 		Number:           (*hexutil.Big)(block.Number()),
-		Hash:             block.Hash(),
+		Hash:             block.MixDigest(),
 		ParentHash:       block.ParentHash(),
 		Nonce:            block.Header().Nonce,
 		MixHash:          block.MixDigest(),
