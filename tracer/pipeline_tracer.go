@@ -306,7 +306,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
@@ -319,7 +319,9 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	}
 	log.Info("[inner s3] 1.upload genesis block", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
 
-	blockDiff := GenesisAllocToStateDiff(alloc)
+	if blockDiff == nil {
+		blockDiff = GenesisAllocToStateDiff(alloc)
+	}
 	blockDiff.Hash = block.Root()
 	// genesis block has no parent
 	blockDiff.ParentHash = types.EmptyRootHash
@@ -491,6 +493,14 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 	}
 
 	log.Info("push genesis block change notification", "block hash", block.Hash().Hex(), "block number", block.Number().Uint64())
+}
+
+func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
+	t.OnGenesisBlockInner(block, alloc, nil)
+}
+
+func (t *PipelineTracer) OnCeloGenesisBlock(block *types.Block, blockDiff *ptypes.BlockStorageDiff) {
+	t.OnGenesisBlockInner(block, nil, blockDiff)
 }
 
 func (t *PipelineTracer) OnBlockDBStart(db tracing.StateDB) {
