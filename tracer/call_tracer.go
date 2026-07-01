@@ -244,12 +244,14 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
-	// Arbitrum system txs (ETH deposits, internal/retryable) are settled by
-	// ArbOS without entering the EVM, so no OnEnter fires and the callstack is
-	// empty. Synthesize the root frame from the tx — mirroring the fake call
-	// nitro's tx_processor.startTracer builds — so the trace is still recorded
-	// instead of index-out-of-ranging on callstack[0] (which panics and, under
-	// nitro's StopWaiter, kills the message-execution loop and freezes the node).
+	// Some txs never enter the EVM, so no OnEnter fires and the callstack is empty
+	// at OnTxEnd. The known case is the Arbitrum onchain tx filter: a filtered tx
+	// forced in via the delayed inbox is reverted by RevertedTxHook, which skips
+	// evm.Call in state_transition (so no OnEnter), leaving a failed receipt.
+	// Synthesize the root frame from the tx + receipt so the trace is still
+	// recorded — with the real gas and a failed marker — instead of
+	// index-out-of-ranging on callstack[0] (which panics and, under nitro's
+	// StopWaiter, kills the message-execution loop and freezes the node).
 	if len(t.callstack) == 0 {
 		var to *common.Address
 		var input []byte
@@ -261,14 +263,23 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 				value = v
 			}
 		}
-		t.callstack = append(t.callstack, callFrame{
+		frame := callFrame{
 			Type:  vm.CALL,
 			From:  t.from,
 			To:    to,
 			Input: input,
 			Gas:   t.gasLimit,
 			Value: value,
-		})
+		}
+		if receipt != nil {
+			frame.GasUsed = receipt.GasUsed
+			// A filtered/reverted tx has a failed receipt: mark the frame failed so
+			// it lands in ErrorTraces, not recorded as a successful call.
+			if receipt.Status == types.ReceiptStatusFailed {
+				frame.Error = vm.ErrExecutionReverted.Error()
+			}
+		}
+		t.callstack = append(t.callstack, frame)
 	}
 	setParentFailed(&t.callstack[0], false)
 	setStorageChange(&t.callstack[0], t.ChangeContracts)
