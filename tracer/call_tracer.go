@@ -103,6 +103,13 @@ type callTracer struct {
 
 	txID string
 
+	// tx and from are captured in OnTxStart so OnTxEnd can synthesize the root
+	// frame for Arbitrum system txs (ETH deposits, internal/retryable) that
+	// ArbOS settles without an EVM call — those never fire OnEnter, leaving the
+	// callstack empty.
+	tx   *types.Transaction
+	from common.Address
+
 	ChangeContracts map[common.Address]struct{}
 	BlockFile       *ptypes.BlockFile
 }
@@ -228,12 +235,40 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+	t.tx = tx
+	t.from = from
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	// Error happened during tx validation.
 	if err != nil {
 		return
+	}
+	// Arbitrum system txs (ETH deposits, internal/retryable) are settled by
+	// ArbOS without entering the EVM, so no OnEnter fires and the callstack is
+	// empty. Synthesize the root frame from the tx — mirroring the fake call
+	// nitro's tx_processor.startTracer builds — so the trace is still recorded
+	// instead of index-out-of-ranging on callstack[0] (which panics and, under
+	// nitro's StopWaiter, kills the message-execution loop and freezes the node).
+	if len(t.callstack) == 0 {
+		var to *common.Address
+		var input []byte
+		value := new(big.Int)
+		if t.tx != nil {
+			to = t.tx.To()
+			input = common.CopyBytes(t.tx.Data())
+			if v := t.tx.Value(); v != nil {
+				value = v
+			}
+		}
+		t.callstack = append(t.callstack, callFrame{
+			Type:  vm.CALL,
+			From:  t.from,
+			To:    to,
+			Input: input,
+			Gas:   t.gasLimit,
+			Value: value,
+		})
 	}
 	setParentFailed(&t.callstack[0], false)
 	setStorageChange(&t.callstack[0], t.ChangeContracts)
