@@ -95,11 +95,12 @@ func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 }
 
 type callTracer struct {
-	callstack []callFrame
-	gasLimit  uint64
-	depth     int
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
+	callstack   []callFrame
+	preCallLogs []ptypes.Event
+	gasLimit    uint64
+	depth       int
+	interrupt   atomic.Bool // Atomic flag to signal execution interruption
+	reason      error       // Textual reason for the interruption
 
 	txID string
 
@@ -187,6 +188,10 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 		Gas:   gas,
 		Value: value,
 	}
+	if len(t.callstack) == 0 && len(t.preCallLogs) > 0 {
+		call.Logs = append(call.Logs, t.preCallLogs...)
+		t.preCallLogs = nil
+	}
 	t.callstack = append(t.callstack, call)
 }
 
@@ -228,6 +233,7 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
 	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
+	t.preCallLogs = nil
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -270,8 +276,8 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if len(t.callstack) > 0 {
 		position = int64(len(t.callstack[len(t.callstack)-1].Calls) + len(t.callstack[len(t.callstack)-1].Logs))
 	} else {
-		// 对于某些链(例如mantle),这个event发生在所有call之前,直接置为0并添加到最终的event中
-		position = 0
+		// Some chains, such as Mantle, can emit logs before the root call frame exists.
+		position = int64(len(t.preCallLogs))
 	}
 
 	l := ptypes.Event{
@@ -286,7 +292,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if len(t.callstack) > 0 {
 		t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, l)
 	} else {
-		t.BlockFile.Events = append(t.BlockFile.Events, l)
+		t.preCallLogs = append(t.preCallLogs, l)
 	}
 }
 
