@@ -14,6 +14,16 @@ type NewAccount struct {
 	CodeHash common.Hash
 }
 
+type BlastNewAccount struct {
+	Address   common.Hash
+	Nonce     uint64
+	Flags     uint8
+	Fixed     *uint256.Int
+	Shares    *uint256.Int
+	Remainder *uint256.Int
+	CodeHash  common.Hash
+}
+
 type NewCode struct {
 	CodeHash common.Hash
 	Code     []byte
@@ -33,6 +43,15 @@ type BlockStorageDiff struct {
 	Hash            common.Hash
 	ParentHash      common.Hash
 	NewAccounts     []NewAccount
+	DeletedAccounts []common.Hash
+	StorageDiff     []AccountStorageDiff
+	NewCodes        []NewCode
+}
+
+type BlastBlockStorageDiff struct {
+	Hash            common.Hash
+	ParentHash      common.Hash
+	NewAccounts     []BlastNewAccount
 	DeletedAccounts []common.Hash
 	StorageDiff     []AccountStorageDiff
 	NewCodes        []NewCode
