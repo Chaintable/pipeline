@@ -2,9 +2,16 @@ package metrics
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/metrics"
 )
+
+type KafkaWriteTimerMetric interface {
+	Time(func())
+	Update(time.Duration)
+	UpdateSince(time.Time)
+}
 
 var (
 	LatestBlockNumber = metrics.NewRegisteredGauge("pipeline/block_num", nil)
@@ -36,6 +43,6 @@ var (
 // KafkaWriteTimer returns the write timer for a Kafka topic. The underlying
 // metrics registry does not support labels, so the topic is part of the metric
 // name (for example, pipeline/kafka_write/orders).
-func KafkaWriteTimer(topic string) *metrics.ResettingTimer {
+func KafkaWriteTimer(topic string) KafkaWriteTimerMetric {
 	return metrics.GetOrRegisterResettingTimer(fmt.Sprintf("pipeline/kafka_write/%s", topic), nil)
 }
