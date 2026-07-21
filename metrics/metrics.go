@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/rcrowley/go-metrics"
 )
 
@@ -25,3 +27,10 @@ var (
 
 	BlockPushTimer = metrics.NewRegisteredTimer("pipeline/block_push", nil)
 )
+
+// KafkaWriteTimer returns the write timer for a Kafka topic. The underlying
+// metrics registry does not support labels, so the topic is part of the metric
+// name (for example, pipeline/kafka_write/orders).
+func KafkaWriteTimer(topic string) metrics.Timer {
+	return metrics.GetOrRegisterTimer(fmt.Sprintf("pipeline/kafka_write/%s", topic), nil)
+}
