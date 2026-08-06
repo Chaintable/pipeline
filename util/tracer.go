@@ -30,11 +30,12 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 }
 
 func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
+	header := block.Header()
 	blockHeader := ptypes.Header{
 		Number:           (*hexutil.Big)(block.Number()),
 		Hash:             block.Hash(),
 		ParentHash:       block.ParentHash(),
-		Nonce:            block.Header().Nonce,
+		Nonce:            header.Nonce,
 		MixHash:          block.MixDigest(),
 		Sha3Uncles:       block.UncleHash(),
 		LogsBloom:        block.Bloom(),
@@ -47,9 +48,13 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 		Timestamp:        hexutil.Uint64(block.Time()),
 		TransactionsRoot: block.TxHash(),
 		ReceiptsRoot:     block.ReceiptHash(),
+		Fees:             (*hexutil.Big)(header.Fees),
+		Rewards:          hexutil.Bytes(header.Rewards),
+		MinerNodeID:      hexutil.Bytes(header.MinerNodeId),
+		MinerNodeSig:     hexutil.Bytes(header.MinerNodeSig),
 	}
-	if block.Header().BaseFee != nil {
-		blockHeader.BaseFeePerGas = (*hexutil.Big)(block.Header().BaseFee)
+	if header.BaseFee != nil {
+		blockHeader.BaseFeePerGas = (*hexutil.Big)(header.BaseFee)
 	}
 	return &blockHeader
 }

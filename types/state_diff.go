@@ -61,4 +61,8 @@ type Header struct {
 	ExcessBlobGas         *hexutil.Uint64  `json:"excessBlobGas,omitempty"`
 	ParentBeaconBlockRoot *common.Hash     `json:"parentBeaconBlockRoot,omitempty"`
 	RequestsRoot          *common.Hash     `json:"requestsRoot,omitempty"`
+	Fees                  *hexutil.Big     `json:"fees"`
+	Rewards               hexutil.Bytes    `json:"rewards"`
+	MinerNodeID           hexutil.Bytes    `json:"minerNodeId"`
+	MinerNodeSig          hexutil.Bytes    `json:"minerNodeSig"`
 }
