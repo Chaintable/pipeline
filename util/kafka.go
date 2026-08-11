@@ -71,11 +71,15 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 	if err != nil {
 		return err
 	}
+	headers, err := EncodeBlockFirstSeenHeaders(blockNotice.NewBlocks)
+	if err != nil {
+		return err
+	}
 	start := time.Now()
 	err = writer.WriteMessages(context.Background(), kafka.Message{
 		Key:     []byte("NewBlock"),
 		Value:   value,
-		Headers: EncodeBlockFirstSeenHeaders(blockNotice.NewBlocks),
+		Headers: headers,
 	})
 	metrics.KafkaWriteTimer(writer.Topic).UpdateSince(start)
 	if err != nil {

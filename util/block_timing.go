@@ -1,7 +1,7 @@
 package util
 
 import (
-	"encoding/binary"
+	"encoding/json"
 	"time"
 
 	"github.com/Chaintable/pipeline/types"
@@ -9,25 +9,28 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-const (
-	BlockFirstSeenHeaderKey = "debank-block-first-seen-v1"
-	blockFirstSeenValueSize = common.HashLength + 8
-)
+const BlockP2PHeaderRecvKey = "block-p2p-header-recv"
 
-// EncodeBlockFirstSeenHeaders creates one timing header per new block. The
-// payload remains unchanged, and missing timings are omitted.
-func EncodeBlockFirstSeenHeaders(blocks []types.BlockContext) []kafka.Header {
-	headers := make([]kafka.Header, 0, len(blocks))
+// EncodeBlockFirstSeenHeaders creates one header containing a block hash to
+// first-seen Unix millisecond map. The payload remains unchanged.
+func EncodeBlockFirstSeenHeaders(blocks []types.BlockContext) ([]kafka.Header, error) {
+	timings := make(map[common.Hash]int64)
 	for _, block := range blocks {
 		if block.FirstSeenAtUnixMilli <= 0 {
 			continue
 		}
-		value := make([]byte, blockFirstSeenValueSize)
-		copy(value, block.Hash[:])
-		binary.BigEndian.PutUint64(value[common.HashLength:], uint64(block.FirstSeenAtUnixMilli))
-		headers = append(headers, kafka.Header{Key: BlockFirstSeenHeaderKey, Value: value})
+		if current, ok := timings[block.Hash]; !ok || block.FirstSeenAtUnixMilli < current {
+			timings[block.Hash] = block.FirstSeenAtUnixMilli
+		}
 	}
-	return headers
+	if len(timings) == 0 {
+		return nil, nil
+	}
+	value, err := json.Marshal(timings)
+	if err != nil {
+		return nil, err
+	}
+	return []kafka.Header{{Key: BlockP2PHeaderRecvKey, Value: value}}, nil
 }
 
 // DecodeBlockFirstSeenHeaders returns the earliest valid timestamp for each
@@ -35,17 +38,21 @@ func EncodeBlockFirstSeenHeaders(blocks []types.BlockContext) []kafka.Header {
 func DecodeBlockFirstSeenHeaders(headers []kafka.Header) map[common.Hash]time.Time {
 	timings := make(map[common.Hash]time.Time)
 	for _, header := range headers {
-		if header.Key != BlockFirstSeenHeaderKey || len(header.Value) != blockFirstSeenValueSize {
+		if header.Key != BlockP2PHeaderRecvKey {
 			continue
 		}
-		millis := int64(binary.BigEndian.Uint64(header.Value[common.HashLength:]))
-		if millis <= 0 {
+		var encoded map[common.Hash]int64
+		if err := json.Unmarshal(header.Value, &encoded); err != nil {
 			continue
 		}
-		hash := common.BytesToHash(header.Value[:common.HashLength])
-		seenAt := time.UnixMilli(millis)
-		if current, ok := timings[hash]; !ok || seenAt.Before(current) {
-			timings[hash] = seenAt
+		for hash, millis := range encoded {
+			if millis <= 0 {
+				continue
+			}
+			seenAt := time.UnixMilli(millis)
+			if current, ok := timings[hash]; !ok || seenAt.Before(current) {
+				timings[hash] = seenAt
+			}
 		}
 	}
 	return timings

@@ -16,13 +16,26 @@ func TestBlockFirstSeenHeadersRoundTrip(t *testing.T) {
 	firstSeen := time.Date(2026, time.August, 10, 12, 0, 0, 123*int(time.Millisecond), time.UTC)
 	secondSeen := firstSeen.Add(2 * time.Second)
 
-	headers := EncodeBlockFirstSeenHeaders([]types.BlockContext{
+	headers, err := EncodeBlockFirstSeenHeaders([]types.BlockContext{
 		{Hash: firstHash, FirstSeenAtUnixMilli: firstSeen.UnixMilli()},
 		{Hash: secondHash, FirstSeenAtUnixMilli: secondSeen.UnixMilli()},
 		{Hash: common.HexToHash("0x03")},
 	})
-	if len(headers) != 2 {
-		t.Fatalf("EncodeBlockFirstSeenHeaders returned %d headers, want 2", len(headers))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(headers) != 1 {
+		t.Fatalf("EncodeBlockFirstSeenHeaders returned %d headers, want 1", len(headers))
+	}
+	if headers[0].Key != BlockP2PHeaderRecvKey {
+		t.Fatalf("header key = %q, want %q", headers[0].Key, BlockP2PHeaderRecvKey)
+	}
+	var encoded map[common.Hash]int64
+	if err := json.Unmarshal(headers[0].Value, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) != 2 || encoded[firstHash] != firstSeen.UnixMilli() || encoded[secondHash] != secondSeen.UnixMilli() {
+		t.Fatalf("encoded timings = %v", encoded)
 	}
 
 	timings := DecodeBlockFirstSeenHeaders(headers)
@@ -38,13 +51,16 @@ func TestDecodeBlockFirstSeenHeadersUsesEarliestValidValue(t *testing.T) {
 	hash := common.HexToHash("0x01")
 	early := time.UnixMilli(1_700_000_000_000)
 	late := early.Add(time.Second)
-	headers := EncodeBlockFirstSeenHeaders([]types.BlockContext{
+	headers, err := EncodeBlockFirstSeenHeaders([]types.BlockContext{
 		{Hash: hash, FirstSeenAtUnixMilli: late.UnixMilli()},
 		{Hash: hash, FirstSeenAtUnixMilli: early.UnixMilli()},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	headers = append(headers,
-		kafka.Header{Key: BlockFirstSeenHeaderKey, Value: []byte("malformed")},
-		kafka.Header{Key: "unknown", Value: make([]byte, blockFirstSeenValueSize)},
+		kafka.Header{Key: BlockP2PHeaderRecvKey, Value: []byte("malformed")},
+		kafka.Header{Key: "unknown", Value: []byte(`{"ignored":true}`)},
 	)
 
 	if got := DecodeBlockFirstSeenHeaders(headers)[hash]; !got.Equal(early) {
