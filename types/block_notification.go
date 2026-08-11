@@ -11,10 +11,11 @@ type BlockChangeNotification struct {
 }
 
 type BlockContext struct {
-	Hash        common.Hash `json:"hash"`
-	ParentHash  common.Hash `json:"parentHash"`
-	BlockNumber uint64      `json:"blockNumber"`
-	Timestamp   uint64      `json:"timestamp"`
+	Hash                 common.Hash `json:"hash"`
+	ParentHash           common.Hash `json:"parentHash"`
+	BlockNumber          uint64      `json:"blockNumber"`
+	Timestamp            uint64      `json:"timestamp"`
+	FirstSeenAtUnixMilli int64       `json:"-"`
 }
 
 type OuterBlockChangeNotification struct {
