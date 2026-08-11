@@ -16,10 +16,10 @@ func TestBlockFirstSeenHeadersRoundTrip(t *testing.T) {
 	firstSeen := time.Date(2026, time.August, 10, 12, 0, 0, 123*int(time.Millisecond), time.UTC)
 	secondSeen := firstSeen.Add(2 * time.Second)
 
-	headers, err := EncodeBlockFirstSeenHeaders([]types.BlockContext{
-		{Hash: firstHash, FirstSeenAtUnixMilli: firstSeen.UnixMilli()},
-		{Hash: secondHash, FirstSeenAtUnixMilli: secondSeen.UnixMilli()},
-		{Hash: common.HexToHash("0x03")},
+	headers, err := EncodeBlockFirstSeenHeaders(map[common.Hash]int64{
+		firstHash:                firstSeen.UnixMilli(),
+		secondHash:               secondSeen.UnixMilli(),
+		common.HexToHash("0x03"): 0,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,13 +51,15 @@ func TestDecodeBlockFirstSeenHeadersUsesEarliestValidValue(t *testing.T) {
 	hash := common.HexToHash("0x01")
 	early := time.UnixMilli(1_700_000_000_000)
 	late := early.Add(time.Second)
-	headers, err := EncodeBlockFirstSeenHeaders([]types.BlockContext{
-		{Hash: hash, FirstSeenAtUnixMilli: late.UnixMilli()},
-		{Hash: hash, FirstSeenAtUnixMilli: early.UnixMilli()},
-	})
+	lateHeaders, err := EncodeBlockFirstSeenHeaders(map[common.Hash]int64{hash: late.UnixMilli()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	earlyHeaders, err := EncodeBlockFirstSeenHeaders(map[common.Hash]int64{hash: early.UnixMilli()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := append(lateHeaders, earlyHeaders...)
 	headers = append(headers,
 		kafka.Header{Key: BlockP2PHeaderRecvKey, Value: []byte("malformed")},
 		kafka.Header{Key: "unknown", Value: []byte(`{"ignored":true}`)},
@@ -68,10 +70,12 @@ func TestDecodeBlockFirstSeenHeadersUsesEarliestValidValue(t *testing.T) {
 	}
 }
 
-func TestBlockFirstSeenTimingIsNotSerialized(t *testing.T) {
+func TestBlockContextPayloadHasNoFirstSeenTiming(t *testing.T) {
 	block := types.BlockContext{
-		Hash:                 common.HexToHash("0x01"),
-		FirstSeenAtUnixMilli: time.Now().UnixMilli(),
+		Hash:        common.HexToHash("0x01"),
+		ParentHash:  common.HexToHash("0x02"),
+		BlockNumber: 12,
+		Timestamp:   34,
 	}
 	data, err := json.Marshal(block)
 	if err != nil {
@@ -83,5 +87,8 @@ func TestBlockFirstSeenTimingIsNotSerialized(t *testing.T) {
 	}
 	if _, ok := decoded["firstSeenAtUnixMilli"]; ok {
 		t.Fatal("first-seen timing leaked into the Kafka payload")
+	}
+	if len(decoded) != 4 {
+		t.Fatalf("BlockContext payload has %d fields, want 4: %v", len(decoded), decoded)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/types"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -66,12 +67,12 @@ func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
 	}
 }
 
-func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotification) error {
+func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotification, firstSeenAt map[common.Hash]int64) error {
 	value, err := EncodeToJsonGzip(blockNotice)
 	if err != nil {
 		return err
 	}
-	headers, err := EncodeBlockFirstSeenHeaders(blockNotice.NewBlocks)
+	headers, err := EncodeBlockFirstSeenHeaders(firstSeenAt)
 	if err != nil {
 		return err
 	}

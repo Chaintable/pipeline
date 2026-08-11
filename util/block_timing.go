@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Chaintable/pipeline/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/segmentio/kafka-go"
 )
@@ -13,15 +12,13 @@ const BlockP2PHeaderRecvKey = "block-p2p-header-recv"
 
 // EncodeBlockFirstSeenHeaders creates one header containing a block hash to
 // first-seen Unix millisecond map. The payload remains unchanged.
-func EncodeBlockFirstSeenHeaders(blocks []types.BlockContext) ([]kafka.Header, error) {
+func EncodeBlockFirstSeenHeaders(firstSeenAt map[common.Hash]int64) ([]kafka.Header, error) {
 	timings := make(map[common.Hash]int64)
-	for _, block := range blocks {
-		if block.FirstSeenAtUnixMilli <= 0 {
+	for hash, millis := range firstSeenAt {
+		if millis <= 0 {
 			continue
 		}
-		if current, ok := timings[block.Hash]; !ok || block.FirstSeenAtUnixMilli < current {
-			timings[block.Hash] = block.FirstSeenAtUnixMilli
-		}
+		timings[hash] = millis
 	}
 	if len(timings) == 0 {
 		return nil, nil
