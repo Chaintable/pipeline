@@ -504,3 +504,38 @@ func TestAllSuccessNoErrorTraces(t *testing.T) {
 		t.Errorf("Events/ErrorEvents len = %d/%d, want 1/0", len(bf.Events), len(bf.ErrorEvents))
 	}
 }
+
+// SELFDESTRUCT uses the same failed-parent classification as other child frames.
+func TestSelfDestructUnderFailedParentIsErrorTrace(t *testing.T) {
+	selfdestruct := callFrame{Type: vm.SELFDESTRUCT, To: testAddr(3)}
+	failed := callFrame{
+		Type:  vm.CALL,
+		To:    testAddr(2),
+		Error: "execution reverted",
+		Calls: []callFrame{selfdestruct},
+	}
+	root := callFrame{Type: vm.CALL, To: testAddr(1), Calls: []callFrame{failed}}
+
+	tr := newTestCallTracer()
+	tr.callstack = []callFrame{root}
+	tr.OnTxEnd(nil, nil)
+
+	bf := tr.BlockFile
+	if len(bf.Traces) != 1 || len(bf.ErrorTraces) != 2 {
+		t.Fatalf(
+			"Traces/ErrorTraces len = %d/%d, want 1/2",
+			len(bf.Traces),
+			len(bf.ErrorTraces),
+		)
+	}
+	got := findTraceByTo(t, bf.ErrorTraces, testAddr(3))
+	if got.CallCreateType != "suicide" {
+		t.Errorf("SELFDESTRUCT CallCreateType = %q, want suicide", got.CallCreateType)
+	}
+	if got.Error != "parent call failed" {
+		t.Errorf("SELFDESTRUCT Error = %q, want parent call failed", got.Error)
+	}
+	if len(got.TraceAddress) != 2 || got.TraceAddress[0] != 0 || got.TraceAddress[1] != 0 {
+		t.Errorf("SELFDESTRUCT TraceAddress = %v, want [0 0]", got.TraceAddress)
+	}
+}
