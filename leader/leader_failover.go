@@ -12,21 +12,65 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// State describes the locally known writer role. Unknown is deliberately
+// different from Backup: while etcd is unavailable we must not write Kafka.
+type State uint8
+
+const (
+	StateUnknown State = iota
+	StateBackup
+	StateLeader
+)
+
+func (s State) String() string {
+	switch s {
+	case StateLeader:
+		return "leader"
+	case StateBackup:
+		return "backup"
+	default:
+		return "unknown"
+	}
+}
+
+const (
+	healthCheckInterval = 5 * time.Second
+	healthCheckTimeout  = 3 * time.Second
+	watchRetryMin       = 250 * time.Millisecond
+	watchRetryMax       = 10 * time.Second
+)
+
 type LeaderFailover struct {
-	client        *clientv3.Client
-	key           string
-	nodeID        string
-	ctx           context.Context
-	cancel        context.CancelFunc
-	IsLeaderNode  bool
-	LeaderMutex   sync.RWMutex
-	callbacks     LeaderCallbacks
-	gracePeriod   time.Duration
-	watcher       clientv3.Watcher
-	currentLeader atomic.Value // stores string
+	client *clientv3.Client
+	key    string
+	nodeID string
+	ctx    context.Context
+	cancel context.CancelFunc
+	// IsLeaderNode is retained for source compatibility. Access it through
+	// IsLeader or IsLeaderLocked; it is always updated while LeaderMutex is held.
+	IsLeaderNode    bool
+	LeaderMutex     sync.RWMutex
+	state           State
+	callbacks       LeaderCallbacks
+	gracePeriod     time.Duration
+	watcher         clientv3.Watcher
+	roleUpdateMu    sync.Mutex
+	leaderValueMu   sync.Mutex
+	currentLeader   string
+	currentRevision int64
+	etcdHealthy     atomic.Bool
+	promotionToken  atomic.Int64
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 func NewLeaderFailover(cfg Config) (*LeaderFailover, error) {
+	if cfg.GracePeriod <= healthCheckInterval+healthCheckTimeout {
+		return nil, fmt.Errorf(
+			"grace period %s must be greater than %s so an unreachable old leader closes its Kafka gate first",
+			cfg.GracePeriod, healthCheckInterval+healthCheckTimeout,
+		)
+	}
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   cfg.Endpoints,
 		DialTimeout: 5 * time.Second,
@@ -36,67 +80,64 @@ func NewLeaderFailover(cfg Config) (*LeaderFailover, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	lf := &LeaderFailover{
 		client:      client,
 		key:         cfg.Key,
 		nodeID:      cfg.NodeID,
 		ctx:         ctx,
 		cancel:      cancel,
+		state:       StateUnknown,
 		gracePeriod: cfg.GracePeriod,
 		watcher:     clientv3.NewWatcher(client),
 	}
-	lf.currentLeader.Store("") // Initialize with empty string
 	return lf, nil
 }
 
-func (lf *LeaderFailover) SetCallbacks(callbacks LeaderCallbacks) {
-	lf.callbacks = callbacks
+func (lf *LeaderFailover) SetCallbacks(callbacks LeaderCallbacks) { lf.callbacks = callbacks }
+
+// Start performs one consistent read/election and then starts the watch loop.
+// The watch loop owns all subsequent etcd reconnects; no lease or TTL is used
+// for the persistent leader key.
+func (lf *LeaderFailover) Start() error {
+	revision, err := lf.reconcile()
+	if err != nil {
+		return fmt.Errorf("[Leader Failover] initial etcd sync failed: %w", err)
+	}
+	go lf.watchLeaderChangesFromRevision(revision + 1)
+	return nil
 }
 
-func (lf *LeaderFailover) Start() error {
-	// initial connection to etcd timeout: 5s
+// reconcile closes the Get-to-Watch gap by returning the revision of the
+// authoritative read. If the key is absent, it attempts the initial election
+// and reads the key again so the resulting role is applied synchronously.
+func (lf *LeaderFailover) reconcile() (int64, error) {
 	ctx, cancel := context.WithTimeout(lf.ctx, 5*time.Second)
 	defer cancel()
 
-	// Read current leader from etcd
 	resp, err := lf.client.Get(ctx, lf.key)
 	if err != nil {
-		return fmt.Errorf("[Leader Failover] failed to get current leader: %w", err)
+		return 0, err
 	}
-
-	// Get the revision from the Get response
-	// This ensures we don't miss any changes between Get and Watch
-	watchRevision := resp.Header.Revision
-
-	if len(resp.Kvs) > 0 {
-		currentLeader := string(resp.Kvs[0].Value)
-		lf.currentLeader.Store(currentLeader)
-		log.Printf("[Leader Failover] Current leader is %s (revision: %d)", currentLeader, watchRevision)
-
-		// Check if this node is the leader
-		if currentLeader == lf.nodeID {
-			// We are the designated leader in etcd
-			// Call becomeLeader immediately since there won't be a watch event for existing state
-			log.Printf("[Leader Failover] Node %s is the current leader in etcd, becoming leader", lf.nodeID)
-			lf.becomeLeader()
-		} else {
-			log.Printf("[Leader Failover] Node %s is in BACKUP mode, current leader is %s", lf.nodeID, currentLeader)
-		}
-	} else {
-		log.Printf("[Leader Failover] No leader set in etcd key %s (revision: %d)", lf.key, watchRevision)
-		// No leader exists, try to become leader
+	if len(resp.Kvs) == 0 {
+		lf.etcdHealthy.Store(true)
+		lf.applyNoLeader(resp.Header.Revision, false)
 		if err := lf.tryToBecomeLeader(); err != nil {
-			log.Printf("[Leader Failover] Failed to become leader: %v", err)
+			return resp.Header.Revision, err
 		}
-		// Note: If tryToBecomeLeader succeeds, the watch will receive the Put event and call becomeLeader
+		resp, err = lf.client.Get(ctx, lf.key)
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	// Start watching for changes from the revision we got from Get
-	// This ensures we don't miss any events that happened after our Get
-	go lf.watchLeaderChangesFromRevision(watchRevision + 1)
-
-	return nil
+	if len(resp.Kvs) == 0 {
+		lf.etcdHealthy.Store(true)
+		lf.applyNoLeader(resp.Header.Revision, false)
+		return resp.Header.Revision, nil
+	}
+	lf.etcdHealthy.Store(true)
+	lf.applyLeaderValue(string(resp.Kvs[0].Value), resp.Header.Revision)
+	return resp.Header.Revision, nil
 }
 
 func (lf *LeaderFailover) tryToBecomeLeader() error {
@@ -106,183 +147,303 @@ func (lf *LeaderFailover) tryToBecomeLeader() error {
 	if lf.getCurrentLeader() != "" {
 		return nil
 	}
-
-	// Try to set ourselves as leader using a transaction to avoid race conditions
-	// Use CreateRevision == 0 to check if key doesn't exist (works even after deletion)
-	txn := lf.client.Txn(ctx)
-	txnResp, err := txn.If(
-		clientv3.Compare(clientv3.CreateRevision(lf.key), "=", 0),
-	).Then(
-		clientv3.OpPut(lf.key, lf.nodeID),
-	).Else(
-		clientv3.OpGet(lf.key),
-	).Commit()
-
+	txnResp, err := lf.client.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(lf.key), "=", 0)).
+		Then(clientv3.OpPut(lf.key, lf.nodeID)).
+		Else(clientv3.OpGet(lf.key)).Commit()
 	if err != nil {
 		return fmt.Errorf("failed to set leader: %w", err)
 	}
-
 	if txnResp.Succeeded {
-		log.Printf("[Leader Failover] Successfully set leader key to %s in etcd", lf.nodeID)
-		// Only update currentLeader, don't call becomeLeader
-		// The watch event will handle the actual state transition
-		lf.currentLeader.Store(lf.nodeID)
-		// Note: becomeLeader() will be called when watch receives the Put event
-	} else {
-		// Someone else is already leader, update our local state
-		if len(txnResp.Responses) > 0 {
-			rangeResp := txnResp.Responses[0].GetResponseRange()
-			if rangeResp != nil && len(rangeResp.Kvs) > 0 {
-				currentLeader := string(rangeResp.Kvs[0].Value)
-				lf.currentLeader.Store(currentLeader)
-				log.Printf("[Leader Failover] Another node (%s) is already leader", currentLeader)
-			}
+		log.Printf("[Leader Failover] Successfully set persistent leader key to %s", lf.nodeID)
+		lf.applyLeaderValue(lf.nodeID, txnResp.Header.Revision)
+		return nil
+	}
+	if len(txnResp.Responses) > 0 {
+		if rangeResp := txnResp.Responses[0].GetResponseRange(); rangeResp != nil && len(rangeResp.Kvs) > 0 {
+			currentLeader := string(rangeResp.Kvs[0].Value)
+			lf.applyLeaderValue(currentLeader, txnResp.Header.Revision)
+			log.Printf("[Leader Failover] Another node (%s) is already leader", currentLeader)
 		}
 	}
-
 	return nil
 }
 
 func (lf *LeaderFailover) watchLeaderChangesFromRevision(revision int64) {
-	// Start watching from the specified revision to avoid missing events
-	log.Printf("[Leader Failover] Starting watch from revision %d", revision)
-	watchChan := lf.watcher.Watch(lf.ctx, lf.key, clientv3.WithRev(revision))
-
+	log.Printf("[Leader Failover] Starting resilient watch from revision %d", revision)
+	backoff := watchRetryMin
 	for {
-		// high priority
-		select {
-		case <-lf.ctx.Done():
+		if lf.ctx.Err() != nil {
 			return
-		default:
+		}
+		watchCtx, watchCancel := context.WithCancel(lf.ctx)
+		watchChan := lf.watcher.Watch(watchCtx, lf.key, clientv3.WithRev(revision))
+		healthCheck := time.NewTicker(healthCheckInterval)
+		watchFailed := false
+		for !watchFailed {
+			select {
+			case <-lf.ctx.Done():
+				healthCheck.Stop()
+				watchCancel()
+				return
+			case resp, ok := <-watchChan:
+				if !ok {
+					lf.markUnknown("etcd watch channel closed")
+					watchFailed = true
+					break
+				}
+				if err := resp.Err(); err != nil {
+					lf.markUnknown(fmt.Sprintf("etcd watch failed: %v", err))
+					watchFailed = true
+					break
+				}
+				if resp.Header.Revision >= revision {
+					revision = resp.Header.Revision + 1
+				}
+				for _, event := range resp.Events {
+					if event.Kv != nil && event.Kv.ModRevision+1 > revision {
+						revision = event.Kv.ModRevision + 1
+					}
+					lf.handleWatchEvent(event)
+				}
+			case <-healthCheck.C:
+				healthRevision, err := lf.healthCheck()
+				if err != nil {
+					lf.markUnknown(fmt.Sprintf("etcd health check failed: %v", err))
+					watchFailed = true
+				} else if healthRevision >= revision {
+					revision = healthRevision + 1
+				}
+			}
+		}
+		healthCheck.Stop()
+		watchCancel()
+		if lf.ctx.Err() != nil {
+			return
 		}
 
-		select {
-		case <-lf.ctx.Done():
-			return
-		case watchResp := <-watchChan:
-			for _, event := range watchResp.Events {
-				lf.handleWatchEvent(event)
+		// Re-read the key after every watch failure. WithRev(revision) below
+		// covers events that happened between this read and the next watch.
+		for {
+			nextRevision, err := lf.reconcile()
+			if err == nil {
+				revision = nextRevision + 1
+				backoff = watchRetryMin
+				break
+			}
+			lf.markUnknown(fmt.Sprintf("etcd reconnect failed: %v", err))
+			select {
+			case <-lf.ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > watchRetryMax {
+				backoff = watchRetryMax
 			}
 		}
 	}
+}
+
+func (lf *LeaderFailover) healthCheck() (int64, error) {
+	ctx, cancel := context.WithTimeout(lf.ctx, healthCheckTimeout)
+	defer cancel()
+	resp, err := lf.client.Get(ctx, lf.key)
+	if err != nil {
+		return 0, err
+	}
+	lf.etcdHealthy.Store(true)
+	if len(resp.Kvs) == 0 {
+		lf.applyNoLeader(resp.Header.Revision, true)
+	} else {
+		lf.applyLeaderValue(string(resp.Kvs[0].Value), resp.Header.Revision)
+	}
+	return resp.Header.Revision, nil
 }
 
 func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 	switch event.Type {
 	case clientv3.EventTypePut:
-		newLeader := string(event.Kv.Value)
-		oldLeader := lf.getCurrentLeader()
-		lf.currentLeader.Store(newLeader)
-
-		log.Printf("[Leader Failover] Leader changed from %s to %s, Current node %s", oldLeader, newLeader, lf.nodeID)
-
-		lf.LeaderMutex.Lock()
-		wasLeader := lf.IsLeaderNode
-		lf.LeaderMutex.Unlock()
-
-		if newLeader == lf.nodeID && !wasLeader {
-			// This node becomes the leader
-			lf.becomeLeader()
-		} else if newLeader != lf.nodeID && wasLeader {
-			// This node loses leadership
-			lf.loseLeadership()
-		} else if newLeader != lf.nodeID && !wasLeader {
-			// Still backup, just different leader
-			log.Printf("[Leader Failover] Current Node %s remains in BACKUP mode, new leader is %s", lf.nodeID, newLeader)
-		}
-
+		lf.applyLeaderValue(string(event.Kv.Value), event.Kv.ModRevision)
 	case clientv3.EventTypeDelete:
-		log.Printf("[Leader Failover] Leader key %s was deleted", lf.key)
-		oldLeader := lf.getCurrentLeader()
-		lf.currentLeader.Store("")
-
-		if lf.IsLeader() {
-			// If we were the leader, lose leadership
-			lf.loseLeadership()
-		}
-
-		// Try to become the new leader after a short delay
-		go func() {
-			// Wait a random time between 0 and 1s to avoid race conditions with other nodes
-			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
-
-			log.Printf("[Leader Failover] Key deleted (old leader was %s), attempting to become leader", oldLeader)
-			if err := lf.tryToBecomeLeader(); err != nil {
-				log.Printf("[Leader Failover] Failed to become leader after key deletion: %v", err)
-			}
-		}()
+		lf.applyNoLeader(event.Kv.ModRevision, true)
 	}
 }
 
-func (lf *LeaderFailover) becomeLeader() {
-	// Wait for the old leader to do cleanup
+func (lf *LeaderFailover) applyLeaderValue(newLeader string, revision int64) {
+	lf.roleUpdateMu.Lock()
+	defer lf.roleUpdateMu.Unlock()
+	oldLeader := lf.getCurrentLeader()
+	if !lf.updateLeaderValue(newLeader, revision) {
+		return
+	}
+	if oldLeader == newLeader && lf.State() != StateUnknown {
+		return
+	}
+	if oldLeader != newLeader {
+		log.Printf("[Leader Failover] Leader changed from %s to %s, current node %s", oldLeader, newLeader, lf.nodeID)
+	}
+	if newLeader == lf.nodeID {
+		// A healthy read after an Unknown period starts a fresh grace window.
+		if lf.State() == StateUnknown {
+			lf.transition(StateBackup)
+		}
+		lf.becomeLeaderAsync(lf.promotionToken.Add(1))
+	} else {
+		lf.promotionToken.Add(1)
+		lf.transition(StateBackup)
+	}
+}
+
+func (lf *LeaderFailover) applyNoLeader(revision int64, scheduleElection bool) {
+	lf.roleUpdateMu.Lock()
+	oldLeader := lf.getCurrentLeader()
+	if !lf.updateLeaderValue("", revision) {
+		lf.roleUpdateMu.Unlock()
+		return
+	}
+	lf.promotionToken.Add(1)
+	lf.transition(StateBackup)
+	lf.roleUpdateMu.Unlock()
+	if !scheduleElection {
+		return
+	}
+	go func() {
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		if lf.ctx.Err() != nil || lf.getCurrentLeader() != "" {
+			return
+		}
+		log.Printf("[Leader Failover] Key deleted (old leader was %s), attempting election", oldLeader)
+		if err := lf.tryToBecomeLeader(); err != nil {
+			log.Printf("[Leader Failover] Failed to become leader after key deletion: %v", err)
+		}
+	}()
+}
+
+func (lf *LeaderFailover) becomeLeaderAsync(token int64) { go lf.becomeLeader(token) }
+
+func (lf *LeaderFailover) becomeLeader(token int64) {
 	log.Printf("[Leader Failover] Current node %s waiting grace period (%v) before becoming leader", lf.nodeID, lf.gracePeriod)
-	time.Sleep(lf.gracePeriod)
+	timer := time.NewTimer(lf.gracePeriod)
+	defer timer.Stop()
+	select {
+	case <-lf.ctx.Done():
+		return
+	case <-timer.C:
+	}
 
 	lf.LeaderMutex.Lock()
 	defer lf.LeaderMutex.Unlock()
-
-	// already becomes leader, just return
-	if lf.IsLeaderNode {
+	// The key may have changed while waiting. Never promote on a stale event.
+	if token != lf.promotionToken.Load() || lf.getCurrentLeader() != lf.nodeID || !lf.etcdHealthy.Load() || lf.state == StateUnknown || lf.state == StateLeader {
 		return
 	}
-
+	if lf.callbacks.OnBecomeLeader != nil {
+		if err := lf.callbacks.OnBecomeLeader(lf.ctx); err != nil {
+			log.Printf("[Leader Failover] Current node %s failed OnBecomeLeader: %v", lf.nodeID, err)
+			go lf.retryPromotion(token)
+			return
+		}
+	}
+	// Check again because the watch path updates these before waiting for this
+	// mutex. A manual switch during checkpoint initialization must win.
+	if lf.getCurrentLeader() != lf.nodeID || !lf.etcdHealthy.Load() {
+		return
+	}
+	lf.state = StateLeader
 	lf.IsLeaderNode = true
 	log.Printf("[Leader Failover] Current node %s became LEADER", lf.nodeID)
+}
 
-	if err := lf.callbacks.OnBecomeLeader(lf.ctx); err != nil {
-		log.Printf("[Leader Failover] Current node %s failed to execute OnBecomeLeader callback: %v", lf.nodeID, err)
+func (lf *LeaderFailover) retryPromotion(token int64) {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-lf.ctx.Done():
+		return
+	case <-timer.C:
+		lf.becomeLeader(token)
 	}
 }
 
-func (lf *LeaderFailover) loseLeadership() {
+func (lf *LeaderFailover) transition(state State) {
 	lf.LeaderMutex.Lock()
 	defer lf.LeaderMutex.Unlock()
-
-	if !lf.IsLeaderNode {
+	if state == StateLeader || lf.state == state {
 		return
 	}
-
-	// Execute callback for losing leadership
-	ctx, cancel := context.WithTimeout(context.Background(), lf.gracePeriod)
-	defer cancel()
-
-	if err := lf.callbacks.OnLoseLeader(ctx); err != nil {
-		log.Printf("[Leader Failover] Current node %s failed to execute OnLoseLeader callback: %v", lf.nodeID, err)
+	wasLeader := lf.state == StateLeader
+	lf.state = state
+	lf.IsLeaderNode = state == StateLeader
+	if wasLeader {
+		// Leadership loss is intentionally lightweight. The mutex gates Kafka
+		// writes; S3 uploads are allowed to finish and are not cancelled.
+		ctx, cancel := context.WithTimeout(lf.ctx, lf.gracePeriod)
+		defer cancel()
+		if lf.callbacks.OnLoseLeader != nil {
+			if err := lf.callbacks.OnLoseLeader(ctx); err != nil {
+				log.Printf("[Leader Failover] Current node %s failed OnLoseLeader: %v", lf.nodeID, err)
+			}
+		}
+		log.Printf("[Leader Failover] Current node %s is no longer leader (state=%s)", lf.nodeID, state)
 	}
+}
 
-	lf.IsLeaderNode = false
-	log.Printf("[Leader Failover] Current node %s is now in BACKUP mode", lf.nodeID)
+func (lf *LeaderFailover) markUnknown(reason string) {
+	// Flip health before waiting for an in-flight Kafka write to release the
+	// mutex. Any newly arriving write observes this immediately and is denied.
+	lf.etcdHealthy.Store(false)
+	log.Printf("[Leader Failover] %s; pausing Kafka writes", reason)
+	lf.transition(StateUnknown)
 }
 
 func (lf *LeaderFailover) IsLeader() bool {
 	lf.LeaderMutex.RLock()
 	defer lf.LeaderMutex.RUnlock()
-	return lf.IsLeaderNode
+	return lf.IsLeaderLocked()
 }
 
-func (lf *LeaderFailover) IsBackup() bool {
+func (lf *LeaderFailover) IsLeaderLocked() bool {
+	return lf.state == StateLeader && lf.etcdHealthy.Load() && lf.getCurrentLeader() == lf.nodeID
+}
+
+func (lf *LeaderFailover) State() State {
 	lf.LeaderMutex.RLock()
 	defer lf.LeaderMutex.RUnlock()
-	return !lf.IsLeader()
+	return lf.state
 }
+
+func (lf *LeaderFailover) IsBackup() bool { return lf.State() == StateBackup }
 
 func (lf *LeaderFailover) getCurrentLeader() string {
-	if leader := lf.currentLeader.Load(); leader != nil {
-		return leader.(string)
-	}
-	return ""
+	lf.leaderValueMu.Lock()
+	defer lf.leaderValueMu.Unlock()
+	return lf.currentLeader
 }
 
-func (lf *LeaderFailover) Stop() error {
-	lf.cancel()
-	return nil
+func (lf *LeaderFailover) updateLeaderValue(leader string, revision int64) bool {
+	lf.leaderValueMu.Lock()
+	defer lf.leaderValueMu.Unlock()
+	if revision < lf.currentRevision {
+		return false
+	}
+	lf.currentLeader = leader
+	lf.currentRevision = revision
+	return true
 }
+
+func (lf *LeaderFailover) Stop() error { lf.cancel(); return nil }
 
 func (lf *LeaderFailover) Close() error {
-	lf.cancel()
-	if err := lf.watcher.Close(); err != nil {
-		return err
-	}
-	return lf.client.Close()
+	lf.closeOnce.Do(func() {
+		lf.markUnknown("leader manager is closing")
+		lf.cancel()
+		if lf.watcher != nil {
+			lf.closeErr = lf.watcher.Close()
+		}
+		if err := lf.client.Close(); lf.closeErr == nil {
+			lf.closeErr = err
+		}
+	})
+	return lf.closeErr
 }

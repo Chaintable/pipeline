@@ -96,6 +96,19 @@ func (m *Manager) IsLeader() bool {
 	return false
 }
 
+// IsLeaderLocked is used by write paths that already hold Lock. It avoids a
+// recursive RWMutex acquisition while keeping the Kafka gate atomic with the
+// role transition.
+func (m *Manager) IsLeaderLocked() bool {
+	if m.ManualMode {
+		return !m.IsManualBackup
+	}
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.IsLeaderLocked()
+	}
+	return false
+}
+
 func (m *Manager) IsBackup() bool {
 	if m.ManualMode {
 		return m.IsManualBackup

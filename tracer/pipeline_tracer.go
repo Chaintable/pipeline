@@ -53,8 +53,8 @@ type pipelineTracerConfig struct {
 	NodeID        string   `json:"node_id"`      // default to hostname
 	GracePeriod   int      `json:"grace_period"` // default to 10 seconds, unit is second
 
-	// Writer node registry configurations
-	WriterRegistryTTL int64 `json:"writer_registry_ttl"` // TTL for writer node registration in seconds, default 30
+	// Deprecated and ignored. Kept so older configs can be rolled forward.
+	WriterRegistryTTL int64 `json:"writer_registry_ttl"`
 }
 
 func (config *pipelineTracerConfig) fillDefaultValues() {
@@ -79,10 +79,6 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 	}
 	if config.GracePeriod == 0 {
 		config.GracePeriod = 10
-	}
-	// Fill default values for writer registry
-	if config.WriterRegistryTTL == 0 {
-		config.WriterRegistryTTL = 10 // 10 seconds default TTL
 	}
 }
 
@@ -132,23 +128,9 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
 
-	// Prepare writer registry configuration
-	var writerConfig *WriterRegistryConfig
-	// Writer registry is always enabled when etcd endpoints are configured
-	if len(t.config.EtcdEndpoints) > 0 {
-		writerConfig = &WriterRegistryConfig{
-			TTL:              t.config.WriterRegistryTTL,
-			NodeXBucket:      t.config.NodeXBucket,
-			ChainTableBucket: t.config.ChainTableBucket,
-			Region:           t.config.Region,
-			Brokers:          t.config.Brokers,
-			Topic:            t.config.Topic,
-		}
-	}
-
 	// Setup leader election based on configuration
 	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, writerConfig)
+		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, nil)
 	if err != nil {
 		log.Crit("Failed to setup leader election", "err", err)
 		// Continue without election - will remain in backup mode
@@ -171,20 +153,14 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 }
 
 func (t *PipelineTracer) OnClose() {
-	// Unregister writer node if registered
-	if WriterRegistry != nil {
-		if err := WriterRegistry.UnregisterNode(); err != nil {
-			log.Error("Failed to unregister writer node during shutdown", "err", err)
-		} else {
-			log.Info("Writer node unregistered during shutdown")
+	// Close the actual global manager. The persistent leader key is not deleted;
+	// manual failover remains authoritative across process restarts.
+	if manager := leader.GlobalManager; manager != nil {
+		if err := manager.Close(); err != nil {
+			log.Error("Failed to close leader manager", "err", err)
 		}
-	}
-
-	// Close leader manager if it exists
-	if LeaderManager != nil {
-		LeaderManager.Close()
-		// Clear global reference
 		leader.GlobalManager = nil
+		LeaderManager = nil
 	}
 	// Close processors
 	if NodeXPusher != nil {
