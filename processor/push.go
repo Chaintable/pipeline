@@ -16,6 +16,7 @@ import (
 	"github.com/Chaintable/pipeline/util"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -274,7 +275,7 @@ func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
 	return &p.LastBlockNotice.NewBlocks[len(p.LastBlockNotice.NewBlocks)-1]
 }
 
-func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification) error {
+func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification, firstSeenAt map[common.Hash]int64) error {
 	leader.GlobalManager.Lock()
 	defer leader.GlobalManager.Unlock()
 
@@ -346,7 +347,7 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 
 	}()
 	// 将区块变更通知写入Kafka
-	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice)
+	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice, firstSeenAt)
 	if err != nil {
 		return fmt.Errorf("写入区块变更通知到Kafka失败: %v", err)
 	}

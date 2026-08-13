@@ -238,7 +238,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange, nil)
 		if err == nil {
 			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
@@ -528,7 +528,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		},
 	}
 
-	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
+	err = NodeXPusher.PushBlockChangeNotification(blockChanges, nil)
 	if err != nil {
 		log.Crit("Failed to push block change notification", "err", err)
 	}
