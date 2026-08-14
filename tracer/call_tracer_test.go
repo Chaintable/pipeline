@@ -135,6 +135,7 @@ func TestAllSuccessNoErrorTraces(t *testing.T) {
 		t.Errorf("Events/ErrorEvents len = %d/%d, want 1/0", len(bf.Events), len(bf.ErrorEvents))
 	}
 }
+
 // SELFDESTRUCT uses the same failed-parent classification as other child frames.
 func TestSelfDestructUnderFailedParentIsErrorTrace(t *testing.T) {
 	selfdestruct := callFrame{Type: vm.SELFDESTRUCT, To: testAddr(3)}
