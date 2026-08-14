@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/types"
 	"github.com/segmentio/kafka-go"
 )
@@ -69,10 +71,12 @@ func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotifi
 	if err != nil {
 		return err
 	}
+	start := time.Now()
 	err = writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte("NewBlock"),
 		Value: value,
 	})
+	metrics.KafkaWriteTimer(writer.Topic).UpdateSince(start)
 	if err != nil {
 		return err
 	}
@@ -84,10 +88,12 @@ func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBl
 	if err != nil {
 		return err
 	}
+	start := time.Now()
 	err = writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte("NewBlock"),
 		Value: value,
 	})
+	metrics.KafkaWriteTimer(writer.Topic).UpdateSince(start)
 	if err != nil {
 		return err
 	}
