@@ -11,8 +11,8 @@ import (
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ava-labs/libevm/common"
+	"github.com/ava-labs/libevm/crypto"
 	"github.com/holiman/uint256"
 )
 

@@ -1,7 +1,7 @@
 package types
 
 import (
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ava-labs/libevm/common/hexutil"
 )
 
 // id = to_hash(event['parent_trace_id'], event['pos_in_parent_trace'])
