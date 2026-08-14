@@ -8,13 +8,13 @@ import (
 	"sync/atomic"
 
 	ptypes "github.com/Chaintable/pipeline/types"
+	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
 	"github.com/morph-l2/go-ethereum/core/tracing"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/core/vm"
 	"github.com/morph-l2/go-ethereum/crypto"
 	"github.com/morph-l2/go-ethereum/log"
-	"github.com/holiman/uint256"
 )
 
 type stateMap = map[common.Address]*account
