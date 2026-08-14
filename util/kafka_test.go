@@ -42,7 +42,7 @@ func TestKafkaWriter(t *testing.T) {
 			},
 		},
 		DropBlocks: nil,
-	})
+	}, nil)
 	if err != nil {
 		t.Error(err)
 	}
