@@ -85,7 +85,6 @@ func TestOnTxEnd_NormalTx_Unchanged(t *testing.T) {
 		t.Fatalf("expected 1 trace, got %d", len(bf.Traces))
 	}
 }
-
 func testAddr(b byte) *common.Address {
 	a := common.BytesToAddress([]byte{b})
 	return &a
