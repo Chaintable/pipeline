@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/Chaintable/pipeline/leader"
 	"github.com/Chaintable/pipeline/metrics"
@@ -628,8 +627,4 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	BlockCtx.Committed = true
 
 	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
-}
-
-func addressToHash(a common.Address) common.Hash {
-	return crypto.HashData(crypto.NewKeccakState(), a.Bytes())
 }

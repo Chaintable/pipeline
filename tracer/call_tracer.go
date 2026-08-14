@@ -98,7 +98,6 @@ var _ vm.EVMLogger = (*callTracer)(nil)
 type callTracer struct {
 	callstack []callFrame
 	gasLimit  uint64
-	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
