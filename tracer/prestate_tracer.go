@@ -8,13 +8,13 @@ import (
 	"sync/atomic"
 
 	ptypes "github.com/Chaintable/pipeline/types"
+	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
 	"github.com/morph-l2/go-ethereum/core/tracing"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/core/vm"
 	"github.com/morph-l2/go-ethereum/crypto"
 	"github.com/morph-l2/go-ethereum/log"
-	"github.com/holiman/uint256"
 )
 
 type stateMap = map[common.Address]*account
@@ -180,10 +180,7 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		for key, val := range state.Storage {
-			// don't include the empty slot
-			if val == (common.Hash{}) {
-				delete(t.pre[addr].Storage, key)
-			}
+			delete(t.pre[addr].Storage, key)
 
 			newVal := t.env.StateDB.GetState(addr, key)
 			if val == newVal {
@@ -191,9 +188,7 @@ func (t *prestateTracer) processDiffState() {
 				delete(t.pre[addr].Storage, key)
 			} else {
 				modified = true
-				if newVal != (common.Hash{}) {
-					postAccount.Storage[key] = newVal
-				}
+				postAccount.Storage[key] = newVal
 			}
 		}
 

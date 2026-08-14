@@ -1,10 +1,10 @@
 package types
 
 import (
+	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
 	"github.com/morph-l2/go-ethereum/common/hexutil"
 	"github.com/morph-l2/go-ethereum/core/types"
-	"github.com/holiman/uint256"
 )
 
 type NewAccount struct {

@@ -9,12 +9,12 @@ import (
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/writer"
+	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/crypto"
 	"github.com/morph-l2/go-ethereum/log"
 	"github.com/morph-l2/go-ethereum/rlp"
-	"github.com/holiman/uint256"
 )
 
 type ExtraInfo struct {
