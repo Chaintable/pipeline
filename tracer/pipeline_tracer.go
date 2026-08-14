@@ -238,7 +238,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange, nil)
 		if err == nil {
 			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
@@ -457,6 +457,49 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		}
 	}
 
+	// 添加原生代币合约创建 tx 和 trace (E地址)
+	nativeTokenAddr := "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	nativeTokenTxID := fmt.Sprintf("0xgenesis03%013d%s", 0, nativeTokenAddr)
+
+	nativeTokenTx := ptypes.Transaction{
+		ID:               nativeTokenTxID,
+		From:             zeroAddr,
+		To:               nativeTokenAddr,
+		Gas:              big.NewInt(0),
+		GasPrice:         big.NewInt(0),
+		GasUsed:          big.NewInt(0),
+		Status:           true,
+		GasFeeCap:        big.NewInt(0),
+		GasTipCap:        big.NewInt(0),
+		Input:            []byte{},
+		Nonce:            big.NewInt(0),
+		TransactionIndex: txIdx,
+		Value:            (*hexutil.Big)(big.NewInt(0)),
+	}
+	blockFile.Txs = append(blockFile.Txs, nativeTokenTx)
+
+	nativeTokenTraceID := util.ToHash([]string{nativeTokenTxID, "", "0"})
+	nativeTokenTrace := ptypes.Trace{
+		ID:                nativeTokenTraceID,
+		From:              zeroAddr,
+		Gas:               big.NewInt(0),
+		Input:             []byte{},
+		To:                nativeTokenAddr,
+		Value:             (*hexutil.Big)(big.NewInt(0)),
+		GasUsed:           big.NewInt(0),
+		Output:            []byte{},
+		CallCreateType:    "create",
+		CallType:          "",
+		TxID:              nativeTokenTxID,
+		ParentTraceID:     "",
+		PosInParentTrace:  0,
+		SelfStorageChange: false,
+		StorageChange:     false,
+		Subtraces:         0,
+		TraceAddress:      []int64{},
+	}
+	blockFile.Traces = append(blockFile.Traces, nativeTokenTrace)
+
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
 	if err != nil {
@@ -485,7 +528,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		},
 	}
 
-	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
+	err = NodeXPusher.PushBlockChangeNotification(blockChanges, nil)
 	if err != nil {
 		log.Crit("Failed to push block change notification", "err", err)
 	}
