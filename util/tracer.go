@@ -64,28 +64,34 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	if tx.To() != nil {
 		to = *tx.To()
 	}
+	gasPrice := tx.GasPrice()
+	gasFeeCap := common.Big0
+	gasTipCap := common.Big0
+	switch tx.Type() {
+	case types.DynamicFeeTxType, 22: // FeeDelegateDynamicFeeTxType
+		gasFeeCap = tx.GasFeeCap()
+		gasTipCap = tx.GasTipCap()
+		if baseFee != nil {
+			gasPrice = new(big.Int).Add(baseFee, gasTipCap)
+			if gasPrice.Cmp(gasFeeCap) > 0 {
+				gasPrice = gasFeeCap
+			}
+		}
+	}
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
 		From:             strings.ToLower(from.Hex()),
 		To:               strings.ToLower(to.Hex()),
 		Gas:              big.NewInt(int64(tx.Gas())),
-		GasPrice:         tx.GasPrice(),
+		GasPrice:         gasPrice,
 		GasUsed:          big.NewInt(int64(receipt.GasUsed)),
 		Status:           receipt.Status == types.ReceiptStatusSuccessful,
-		GasFeeCap:        common.Big0,
-		GasTipCap:        common.Big0,
+		GasFeeCap:        gasFeeCap,
+		GasTipCap:        gasTipCap,
 		Input:            tx.Data(),
 		Nonce:            big.NewInt(int64(tx.Nonce())),
 		TransactionIndex: int64(receipt.TransactionIndex),
 		Value:            (*hexutil.Big)(tx.Value()),
-	}
-	switch tx.Type() {
-	case types.DynamicFeeTxType:
-		transaction.GasFeeCap = tx.GasFeeCap()
-		transaction.GasTipCap = tx.GasTipCap()
-	case 22: // FeeDelegateDynamicFeeTxType
-		transaction.GasFeeCap = tx.GasFeeCap()
-		transaction.GasTipCap = tx.GasTipCap()
 	}
 	return transaction
 }
