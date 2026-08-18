@@ -91,7 +91,6 @@ func (f *callFrame) processOutput(output []byte, err error) {
 
 type callTracer struct {
 	callstack []callFrame
-	gasLimit  uint64
 	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
@@ -171,7 +170,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
-		Gas:   t.gasLimit,
+		Gas:   gas,
 		Value: value,
 	}
 	t.callstack = append(t.callstack, call)
@@ -230,7 +229,6 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 }
 
 func (t *callTracer) OnTxStart(tx *types.Transaction, from common.Address) {
-	t.gasLimit = tx.Gas()
 	t.txID = tx.Hash().Hex()
 }
 
