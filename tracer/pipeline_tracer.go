@@ -293,6 +293,13 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
+// genesisTxID 构造 genesis 合成 tx 的 id: 0x + 2位类型码 + 22个0 + 小写地址(去0x, 40字符), 总长66字符,
+// 与真实 tx hash 等长, 且为合法 hex, 可解析为 bytes32.
+// kind: 1=alloc balance transfer, 2=alloc code create, 3=native token create
+func genesisTxID(kind int, addrLower string) string {
+	return fmt.Sprintf("0x%02d%022d%s", kind, 0, strings.TrimPrefix(addrLower, "0x"))
+}
+
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
@@ -351,8 +358,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 		// 处理有 balance 的账户 - 构造转账 tx 和 call trace
 		if account.Balance != nil && account.Balance.Sign() > 0 {
-			// tx id: 0xgenesis01 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis01%013d%s", 0, addrLower)
+			// tx id: 0x + 01 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+			txID := genesisTxID(1, addrLower)
 
 			tx := ptypes.Transaction{
 				ID:               txID,
@@ -398,8 +405,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 		// 处理有 code 的账户 - 构造 create tx 和 create trace
 		if len(account.Code) > 0 {
-			// tx id: 0xgenesis02 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis02%013d%s", 0, addrLower)
+			// tx id: 0x + 02 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+			txID := genesisTxID(2, addrLower)
 
 			tx := ptypes.Transaction{
 				ID:               txID,
@@ -446,7 +453,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 	// 添加原生代币合约创建 tx 和 trace (E地址)
 	nativeTokenAddr := "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	nativeTokenTxID := fmt.Sprintf("0xgenesis03%013d%s", 0, nativeTokenAddr)
+	// tx id: 0x + 03 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+	nativeTokenTxID := genesisTxID(3, nativeTokenAddr)
 
 	nativeTokenTx := ptypes.Transaction{
 		ID:               nativeTokenTxID,
