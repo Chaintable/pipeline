@@ -31,6 +31,7 @@ type PushProcessor struct {
 	S3DataCh        chan *DataFile
 	Brokers         []string
 	Topic           string
+	noticeMu        sync.RWMutex
 }
 
 func NewPushProcessor(region string, bucket string, brokers []string, topic string, s3TempDir string) (*PushProcessor, error) {
@@ -68,9 +69,9 @@ func (p *PushProcessor) UpdateLastBlock() error {
 	}
 	log.Printf("update last block notice: %+v\n", lastBlockNotice)
 
-	// Simply update the last block notice without locking
-	// The locking should be handled at a higher level if needed
+	p.noticeMu.Lock()
 	p.LastBlockNotice = lastBlockNotice
+	p.noticeMu.Unlock()
 	return nil
 }
 
@@ -176,7 +177,7 @@ func (p *PushProcessor) overwriteOnUpload(file *DataFile) bool {
 	if file.Kind == "block_file_validation" {
 		return false
 	}
-	return leader.GlobalManager.IsLeader()
+	return leader.GlobalManager != nil && leader.GlobalManager.IsLeader()
 }
 
 func (p *PushProcessor) uploadFileToS3(file *DataFile, overWrite bool) error {
@@ -269,28 +270,26 @@ func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 }
 
 func (p *PushProcessor) LastPushedBlock() *types.BlockContext {
-	if p.LastBlockNotice == nil {
-		return nil
-	}
-	return &p.LastBlockNotice.NewBlocks[len(p.LastBlockNotice.NewBlocks)-1]
+	p.noticeMu.RLock()
+	defer p.noticeMu.RUnlock()
+	return p.lastPushedBlockLocked()
 }
 
-func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification, firstSeenAt map[common.Hash]int64) error {
+func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChangeNotification, firstSeenAt ...map[common.Hash]int64) error {
+	if blockNotice == nil || len(blockNotice.NewBlocks) == 0 {
+		return fmt.Errorf("block change notification has no new blocks")
+	}
+	if leader.GlobalManager == nil {
+		return fmt.Errorf("leader manager is not initialized")
+	}
 	leader.GlobalManager.Lock()
 	defer leader.GlobalManager.Unlock()
+	p.noticeMu.Lock()
+	defer p.noticeMu.Unlock()
 
-	if leader.GlobalManager.ManualMode {
-		// backup in fixed mode
-		if leader.GlobalManager.IsManualBackup {
-			log.Printf("backup in fixed node, skip push block change notification\n")
-			return nil
-		}
-	} else {
-		// backup in etcd-based failover mode
-		if !leader.GlobalManager.LeaderFailover.IsLeaderNode {
-			log.Printf("backup in etcd node, skip push block change notification\n")
-			return nil
-		}
+	if !leader.GlobalManager.IsLeaderLocked() {
+		log.Printf("node is not the active leader, skip push block change notification\n")
+		return nil
 	}
 
 	if len(blockNotice.NewBlocks) > 1 {
@@ -319,23 +318,24 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 		}
 	}
 
-	if p.LastPushedBlock() == nil && blockNotice.NewBlocks[0].BlockNumber != 0 {
+	lastPushedBlock := p.lastPushedBlockLocked()
+	if lastPushedBlock == nil && blockNotice.NewBlocks[0].BlockNumber != 0 {
 		return fmt.Errorf("last pushed block is empty but new block number is not 0")
 	}
 
-	if p.LastPushedBlock() != nil &&
-		(p.LastPushedBlock().BlockNumber >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber) {
+	if lastPushedBlock != nil &&
+		(lastPushedBlock.BlockNumber >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber) {
 		return nil
 	}
 
-	if p.LastPushedBlock() != nil {
+	if lastPushedBlock != nil {
 		if blockNotice.ChangeType == 1 {
-			if p.LastPushedBlock().Hash != blockNotice.NewBlocks[0].ParentHash {
+			if lastPushedBlock.Hash != blockNotice.NewBlocks[0].ParentHash {
 				return fmt.Errorf("last pushed block hash is not equal to new block parent hash")
 			}
 		}
 		if blockNotice.ChangeType == 2 {
-			if p.LastPushedBlock().Hash != blockNotice.DropBlocks[len(blockNotice.DropBlocks)-1].Hash {
+			if len(blockNotice.DropBlocks) == 0 || lastPushedBlock.Hash != blockNotice.DropBlocks[len(blockNotice.DropBlocks)-1].Hash {
 				return fmt.Errorf("last pushed block hash is not equal to drop block hash")
 			}
 		}
@@ -347,7 +347,7 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 
 	}()
 	// 将区块变更通知写入Kafka
-	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice, firstSeenAt)
+	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice, firstSeenAt...)
 	if err != nil {
 		return fmt.Errorf("写入区块变更通知到Kafka失败: %v", err)
 	}
@@ -357,6 +357,224 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	metrics.LatestBlockNumber.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber))
 	metrics.LatestBlockTime.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].Timestamp))
 	return nil
+}
+
+func (p *PushProcessor) lastPushedBlockLocked() *types.BlockContext {
+	if p.LastBlockNotice == nil || len(p.LastBlockNotice.NewBlocks) == 0 {
+		return nil
+	}
+	last := p.LastBlockNotice.NewBlocks[len(p.LastBlockNotice.NewBlocks)-1]
+	return &last
+}
+
+// getCommonAncestor returns the common ancestor of two blocks and their paths from the ancestor
+// NotifyBlockCommit is called by geth when a block is committed to the canonical chain.
+// It checks leader status first, then computes reorg if needed, and pushes to kafka.
+// Backup nodes return immediately without any computation.
+func (p *PushProcessor) NotifyBlockCommit(block interface{ NumberU64() uint64; Hash() common.Hash; ParentHash() common.Hash; Time() uint64 }, bc BlockChainReader, firstSeenAt map[common.Hash]int64) error {
+	if leader.GlobalManager == nil {
+		return fmt.Errorf("leader manager is not initialized")
+	}
+
+	leader.GlobalManager.Lock()
+	defer leader.GlobalManager.Unlock()
+	p.noticeMu.Lock()
+	defer p.noticeMu.Unlock()
+
+	// 1. Check leader status first - backup nodes return immediately without any computation
+	if !leader.GlobalManager.IsLeaderLocked() {
+		log.Printf("backup node: skip block commit notification\n")
+		return nil
+	}
+
+	// 2. Only leader nodes proceed - check if we need to push anything
+	lastPushedBlock := p.lastPushedBlockLocked()
+
+	// If last pushed block is newer than current block, skip (e.g., after unwind)
+	if lastPushedBlock != nil && lastPushedBlock.BlockNumber > block.NumberU64() {
+		log.Printf("last pushed block %d is newer than current block %d, skip\n", lastPushedBlock.BlockNumber, block.NumberU64())
+		return nil
+	}
+
+	// If no last pushed block and this is not genesis, error
+	if lastPushedBlock == nil && block.NumberU64() != 0 {
+		return fmt.Errorf("last pushed block is empty but new block number is not 0")
+	}
+
+	// 3. Compute common ancestor and determine what to push
+	currentBlock := types.BlockContext{
+		BlockNumber: block.NumberU64(),
+		Hash:        block.Hash(),
+		ParentHash:  block.ParentHash(),
+		Timestamp:   block.Time(),
+	}
+
+	var blockChange *types.BlockChangeNotification
+
+	if lastPushedBlock != nil && lastPushedBlock.BlockNumber <= block.NumberU64() {
+		_, dropBlocks, newBlocks := p.getCommonAncestor(bc, *lastPushedBlock, currentBlock)
+
+		if len(dropBlocks) > 0 {
+			// Fork/reorg case
+			blockChange = &types.BlockChangeNotification{
+				ChangeType: 2,
+				NewBlocks:  newBlocks,
+				DropBlocks: dropBlocks,
+			}
+		} else if len(newBlocks) > 0 {
+			// Normal case: new blocks on canonical chain
+			blockChange = &types.BlockChangeNotification{
+				ChangeType: 1,
+				NewBlocks:  newBlocks,
+			}
+		}
+	} else if lastPushedBlock == nil && block.NumberU64() == 0 {
+		// Genesis block
+		blockChange = &types.BlockChangeNotification{
+			ChangeType: 1,
+			NewBlocks:  []types.BlockContext{currentBlock},
+		}
+	}
+
+	// 4. Push to kafka if there's something to push
+	if blockChange != nil {
+		if err := p.pushBlockChangeNotificationLocked(blockChange, firstSeenAt); err != nil {
+			return fmt.Errorf("failed to push block change notification: %w", err)
+		}
+		log.Printf("pushed block change notification: changeType=%d, dropBlocks=%d, newBlocks=%d\n",
+			blockChange.ChangeType, len(blockChange.DropBlocks), len(blockChange.NewBlocks))
+	}
+
+	return nil
+}
+
+// pushBlockChangeNotificationLocked is the internal implementation that assumes locks are held
+func (p *PushProcessor) pushBlockChangeNotificationLocked(blockNotice *types.BlockChangeNotification, firstSeenAt map[common.Hash]int64) error {
+	if blockNotice == nil || len(blockNotice.NewBlocks) == 0 {
+		return fmt.Errorf("block change notification has no new blocks")
+	}
+
+	// Validate new blocks are in strict order and parent-child relationship
+	if len(blockNotice.NewBlocks) > 1 {
+		for i := 0; i < len(blockNotice.NewBlocks)-1; i++ {
+			current := blockNotice.NewBlocks[i]
+			next := blockNotice.NewBlocks[i+1]
+
+			if current.BlockNumber+1 != next.BlockNumber {
+				return fmt.Errorf("block number not in strict order: %d, %d", current.BlockNumber, next.BlockNumber)
+			}
+
+			if current.Hash != next.ParentHash {
+				return fmt.Errorf("parent hash not match: %s, %s", current.Hash, next.ParentHash)
+			}
+		}
+	}
+
+	// Validate against last pushed block
+	lastPushedBlock := p.lastPushedBlockLocked()
+	if lastPushedBlock != nil {
+		// Skip if we're trying to push old blocks
+		if lastPushedBlock.BlockNumber >= blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber {
+			return nil
+		}
+
+		// Validate change type consistency
+		if blockNotice.ChangeType == 1 {
+			if lastPushedBlock.Hash != blockNotice.NewBlocks[0].ParentHash {
+				return fmt.Errorf("last pushed block hash is not equal to new block parent hash")
+			}
+		}
+		if blockNotice.ChangeType == 2 {
+			if len(blockNotice.DropBlocks) == 0 || lastPushedBlock.Hash != blockNotice.DropBlocks[len(blockNotice.DropBlocks)-1].Hash {
+				return fmt.Errorf("last pushed block hash is not equal to drop block hash")
+			}
+		}
+	}
+
+	start := time.Now()
+	defer func() {
+		metrics.BlockPushTimer.UpdateSince(start)
+	}()
+
+	// Write to Kafka
+	var firstSeenAtSlice []map[common.Hash]int64
+	if firstSeenAt != nil {
+		firstSeenAtSlice = []map[common.Hash]int64{firstSeenAt}
+	}
+	err := util.WriteBlockNotice(p.KafkaWriter, blockNotice, firstSeenAtSlice...)
+	if err != nil {
+		return fmt.Errorf("failed to write block notice to kafka: %w", err)
+	}
+
+	// Update last pushed block
+	p.LastBlockNotice = blockNotice
+	metrics.LatestBlockNumber.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].BlockNumber))
+	metrics.LatestBlockTime.Update(int64(blockNotice.NewBlocks[len(blockNotice.NewBlocks)-1].Timestamp))
+	return nil
+}
+
+func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.BlockContext, blockb types.BlockContext) (types.BlockContext, []types.BlockContext, []types.BlockContext) {
+	var (
+		chainA, chainB []types.BlockContext
+	)
+
+	// Fast path: blockb is direct child of blocka
+	if blockb.ParentHash == blocka.Hash {
+		return blocka, chainA, []types.BlockContext{blockb}
+	}
+
+	// Bring blockb down to same height as blocka
+	for blockb.BlockNumber > blocka.BlockNumber {
+		chainB = append(chainB, blockb)
+		headerb := bc.GetHeaderByHash2(blockb.ParentHash)
+		if headerb == nil {
+			log.Fatalf("Failed to get header by hash: %s", blockb.ParentHash)
+		}
+		blockb = types.BlockContext{
+			BlockNumber: headerb.Number.Uint64(),
+			Hash:        headerb.Hash(),
+			ParentHash:  headerb.ParentHash,
+			Timestamp:   headerb.Time,
+		}
+	}
+
+	// Walk both chains back until we find common ancestor
+	for blocka.Hash != blockb.Hash {
+		chainA = append(chainA, blocka)
+		headera := bc.GetHeaderByHash2(blocka.ParentHash)
+		if headera == nil {
+			log.Fatalf("Failed to get header by hash: %s", blocka.ParentHash)
+		}
+		blocka = types.BlockContext{
+			BlockNumber: headera.Number.Uint64(),
+			Hash:        headera.Hash(),
+			ParentHash:  headera.ParentHash,
+			Timestamp:   headera.Time,
+		}
+
+		chainB = append(chainB, blockb)
+		headerb := bc.GetHeaderByHash2(blockb.ParentHash)
+		if headerb == nil {
+			log.Fatalf("Failed to get header by hash: %s", blockb.ParentHash)
+		}
+		blockb = types.BlockContext{
+			BlockNumber: headerb.Number.Uint64(),
+			Hash:        headerb.Hash(),
+			ParentHash:  headerb.ParentHash,
+			Timestamp:   headerb.Time,
+		}
+	}
+
+	// Now blocka == blockb == ancestor
+	// Reverse chains so they're in ascending order
+	for i, j := 0, len(chainA)-1; i < j; i, j = i+1, j-1 {
+		chainA[i], chainA[j] = chainA[j], chainA[i]
+	}
+	for i, j := 0, len(chainB)-1; i < j; i, j = i+1, j-1 {
+		chainB[i], chainB[j] = chainB[j], chainB[i]
+	}
+
+	return blocka, chainA, chainB
 }
 
 func (p *PushProcessor) Close() {

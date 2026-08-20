@@ -290,7 +290,7 @@ func genesisTxID(kind int, addrLower string) string {
 }
 
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
-	if NodeXPusher.LastBlockNotice != nil {
+	if NodeXPusher.LastPushedBlock() != nil {
 		return
 	}
 
