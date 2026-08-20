@@ -1,5 +1,3 @@
-//go:build integration
-
 package util
 
 import (
@@ -42,7 +40,7 @@ func TestKafkaWriter(t *testing.T) {
 			},
 		},
 		DropBlocks: nil,
-	}, nil)
+	})
 	if err != nil {
 		t.Error(err)
 	}

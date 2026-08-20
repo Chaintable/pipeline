@@ -182,7 +182,10 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		for key, val := range state.Storage {
-			delete(t.pre[addr].Storage, key)
+			// don't include the empty slot
+			if val == (common.Hash{}) {
+				delete(t.pre[addr].Storage, key)
+			}
 
 			newVal := t.env.StateDB.GetState(addr, key)
 			if val == newVal {
@@ -190,7 +193,9 @@ func (t *prestateTracer) processDiffState() {
 				delete(t.pre[addr].Storage, key)
 			} else {
 				modified = true
-				postAccount.Storage[key] = newVal
+				if newVal != (common.Hash{}) {
+					postAccount.Storage[key] = newVal
+				}
 			}
 		}
 
