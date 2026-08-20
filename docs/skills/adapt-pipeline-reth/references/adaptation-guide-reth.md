@@ -145,10 +145,9 @@ pub fn build_genesis_txs_and_traces(genesis: &Genesis) -> (Vec<DebankTransaction
 
 Matches the Go implementation's genesis handling:
 - Sorted addresses for deterministic output
-- Synthetic tx id = `0x` + 2-char kind + 22 zeros + lowercase address without `0x` (40 chars) → 66 chars, valid bytes32
-  - kind `01` (`0x010000000000000000000000<addr>`): transfer txs for accounts with balance
-  - kind `02` (`0x020000000000000000000000<addr>`): create txs for accounts with code
-  - kind `03` (`0x030000000000000000000000eeee...eeee`): native token contract creation (0xeeee...eeee)
+- `0xgenesis01...` transfer txs for accounts with balance
+- `0xgenesis02...` create txs for accounts with code
+- `0xgenesis03...` native token contract creation (0xeeee...eeee)
 
 ### 1.5 Dependencies
 
