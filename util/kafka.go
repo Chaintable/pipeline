@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/types"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -64,15 +67,22 @@ func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
 	}
 }
 
-func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotification) error {
+func WriteBlockNotice(writer *kafka.Writer, blockNotice *types.BlockChangeNotification, firstSeenAt map[common.Hash]int64) error {
 	value, err := EncodeToJsonGzip(blockNotice)
 	if err != nil {
 		return err
 	}
+	headers, err := EncodeBlockFirstSeenHeaders(firstSeenAt)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
 	err = writer.WriteMessages(context.Background(), kafka.Message{
-		Key:   []byte("NewBlock"),
-		Value: value,
+		Key:     []byte("NewBlock"),
+		Value:   value,
+		Headers: headers,
 	})
+	metrics.KafkaWriteTimer(writer.Topic).UpdateSince(start)
 	if err != nil {
 		return err
 	}
@@ -84,10 +94,12 @@ func WriteOuterBlockNotice(writer *kafka.Writer, outerBlockNotice *types.OuterBl
 	if err != nil {
 		return err
 	}
+	start := time.Now()
 	err = writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   []byte("NewBlock"),
 		Value: value,
 	})
+	metrics.KafkaWriteTimer(writer.Topic).UpdateSince(start)
 	if err != nil {
 		return err
 	}

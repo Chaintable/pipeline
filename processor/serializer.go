@@ -14,7 +14,9 @@ type DataFile struct {
 }
 
 // s3key: chain_id/block_id (version为空时)
-//        chain_id/version/block_id (version不为空时)
+//
+//	chain_id/version/block_id (version不为空时)
+//
 // 外部s3
 func SerializeFile(chainID, version string, blockFile *types.BlockFile) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(blockFile)
@@ -35,7 +37,9 @@ func SerializeFile(chainID, version string, blockFile *types.BlockFile) (*DataFi
 }
 
 // s3key: chain_id/block_height/block_id (version为空时)
-//        chain_id/version/block_height/block_id (version不为空时)
+//
+//	chain_id/version/block_height/block_id (version不为空时)
+//
 // 外部s3,empty object,只用key
 func SerializeFileValidation(chainID, version string, blockFile *types.BlockFile) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(blockFile.Validation())
@@ -56,7 +60,9 @@ func SerializeFileValidation(chainID, version string, blockFile *types.BlockFile
 }
 
 // s3Key: <chainID>/<blockHash>/block (version为空时)
-//        <chainID>/<version>/<blockHash>/block (version不为空时)
+//
+//	<chainID>/<version>/<blockHash>/block (version不为空时)
+//
 // 内部s3
 func SerializeHeader(chainID, version string, header *types.Header) (*DataFile, error) {
 	data, err := util.EncodeToJsonGzip(header)
@@ -77,7 +83,9 @@ func SerializeHeader(chainID, version string, header *types.Header) (*DataFile, 
 }
 
 // s3Key: <chainID>/<blockRoot>/stateDiff (version为空时)
-//        <chainID>/<version>/<blockRoot>/stateDiff (version不为空时)
+//
+//	<chainID>/<version>/<blockRoot>/stateDiff (version不为空时)
+//
 // 内部s3
 func SerializeStateDiff(chainID, version string, stateDiff *types.BlockStorageDiff) (*DataFile, error) {
 	data, err := util.EncodeToRlp(stateDiff)
