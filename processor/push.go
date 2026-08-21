@@ -371,7 +371,12 @@ func (p *PushProcessor) lastPushedBlockLocked() *types.BlockContext {
 // NotifyBlockCommit is called by geth when a block is committed to the canonical chain.
 // It checks leader status first, then computes reorg if needed, and pushes to kafka.
 // Backup nodes return immediately without any computation.
-func (p *PushProcessor) NotifyBlockCommit(block interface{ NumberU64() uint64; Hash() common.Hash; ParentHash() common.Hash; Time() uint64 }, bc BlockChainReader, firstSeenAt map[common.Hash]int64) error {
+func (p *PushProcessor) NotifyBlockCommit(block interface {
+	NumberU64() uint64
+	Hash() common.Hash
+	ParentHash() common.Hash
+	Time() uint64
+}, bc BlockChainReader, firstSeenAt map[common.Hash]int64) error {
 	if leader.GlobalManager == nil {
 		return fmt.Errorf("leader manager is not initialized")
 	}
