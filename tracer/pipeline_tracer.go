@@ -50,8 +50,9 @@ type pipelineTracerConfig struct {
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
 	ElectionKey   string   `json:"election_key"`
-	NodeID        string   `json:"node_id"`      // default to hostname
-	GracePeriod   int      `json:"grace_period"` // default to 10 seconds, unit is second
+	NodeID        string   `json:"node_id"`        // default to hostname
+	GracePeriod   int      `json:"grace_period"`   // default to 10 seconds, unit is second
+	WriteLockTTL  int64    `json:"write_lock_ttl"` // TTL for writeLock key in seconds, default 10
 
 	// Deprecated and ignored. Kept so older configs can be rolled forward.
 	WriterRegistryTTL int64 `json:"writer_registry_ttl"`
@@ -79,6 +80,9 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 	}
 	if config.GracePeriod == 0 {
 		config.GracePeriod = 10
+	}
+	if config.WriteLockTTL <= 0 {
+		config.WriteLockTTL = 10
 	}
 }
 
@@ -130,7 +134,7 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 
 	// Setup leader election based on configuration
 	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, nil)
+		t.config.NodeID, t.config.IsBackup, t.config.GracePeriod, t.config.WriteLockTTL)
 	if err != nil {
 		log.Crit("Failed to setup leader election", "err", err)
 		// Continue without election - will remain in backup mode
@@ -160,7 +164,6 @@ func (t *PipelineTracer) OnClose() {
 			log.Error("Failed to close leader manager", "err", err)
 		}
 		leader.GlobalManager = nil
-		LeaderManager = nil
 	}
 	// Close processors
 	if NodeXPusher != nil {

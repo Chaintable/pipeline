@@ -26,6 +26,7 @@ type ManagerConfig struct {
 	OnBecomeLeader func() error
 	OnLoseLeader   func() error
 	GracePeriod    time.Duration
+	WriteLockTTL   int64 // TTL for writeLock key in seconds
 }
 
 func NewManager(cfg *ManagerConfig) (*Manager, error) {
@@ -41,10 +42,11 @@ func NewManager(cfg *ManagerConfig) (*Manager, error) {
 	} else {
 		// Use etcd-based failover
 		electionCfg := Config{
-			Endpoints:   cfg.EtcdEndpoints,
-			Key:         cfg.ElectionKey,
-			NodeID:      cfg.NodeID,
-			GracePeriod: cfg.GracePeriod,
+			Endpoints:    cfg.EtcdEndpoints,
+			Key:          cfg.ElectionKey,
+			NodeID:       cfg.NodeID,
+			GracePeriod:  cfg.GracePeriod,
+			WriteLockTTL: cfg.WriteLockTTL,
 		}
 
 		callbacks := LeaderCallbacks{

@@ -41,14 +41,11 @@ const (
 )
 
 type LeaderFailover struct {
-	client *clientv3.Client
-	key    string
-	nodeID string
-	ctx    context.Context
-	cancel context.CancelFunc
-	// IsLeaderNode is retained for source compatibility. Access it through
-	// IsLeader or IsLeaderLocked; it is always updated while LeaderMutex is held.
-	IsLeaderNode    bool
+	client          *clientv3.Client
+	key             string
+	nodeID          string
+	ctx             context.Context
+	cancel          context.CancelFunc
 	LeaderMutex     sync.RWMutex
 	state           State
 	callbacks       LeaderCallbacks
@@ -62,6 +59,14 @@ type LeaderFailover struct {
 	promotionToken  atomic.Int64
 	closeOnce       sync.Once
 	closeErr        error
+
+	// WriteLock fields
+	writeLockKey     string
+	writeLockTTL     int64
+	writeLockLease   clientv3.Lease
+	writeLockLeaseID clientv3.LeaseID
+	writeLockCancel  context.CancelFunc
+	writeLockMu      sync.Mutex
 }
 
 func NewLeaderFailover(cfg Config) (*LeaderFailover, error) {
@@ -79,16 +84,26 @@ func NewLeaderFailover(cfg Config) (*LeaderFailover, error) {
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
 
+	// Set default writeLock TTL
+	writeLockTTL := cfg.WriteLockTTL
+	if writeLockTTL <= 0 {
+		writeLockTTL = 10 // default 10 seconds
+	} else if writeLockTTL > 30 {
+		return nil, fmt.Errorf("writeLockTTL must be <= 30 seconds, got %d", writeLockTTL)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	lf := &LeaderFailover{
-		client:      client,
-		key:         cfg.Key,
-		nodeID:      cfg.NodeID,
-		ctx:         ctx,
-		cancel:      cancel,
-		state:       StateUnknown,
-		gracePeriod: cfg.GracePeriod,
-		watcher:     clientv3.NewWatcher(client),
+		client:       client,
+		key:          cfg.Key,
+		nodeID:       cfg.NodeID,
+		ctx:          ctx,
+		cancel:       cancel,
+		state:        StateUnknown,
+		gracePeriod:  cfg.GracePeriod,
+		watcher:      clientv3.NewWatcher(client),
+		writeLockKey: cfg.Key + "/writeLock",
+		writeLockTTL: writeLockTTL,
 	}
 	return lf, nil
 }
@@ -114,16 +129,29 @@ func (lf *LeaderFailover) reconcile() (int64, error) {
 	ctx, cancel := context.WithTimeout(lf.ctx, 5*time.Second)
 	defer cancel()
 
+	// Read persistent key
 	resp, err := lf.client.Get(ctx, lf.key)
 	if err != nil {
 		return 0, err
 	}
+
+	// Read writeLock key
+	wlResp, err := lf.client.Get(ctx, lf.writeLockKey)
+	if err != nil {
+		// WriteLock read failure doesn't block, just log
+		log.Printf("[Leader Failover] Failed to read writeLock key: %v", err)
+	}
+
+	writeLockExists := wlResp != nil && len(wlResp.Kvs) > 0
+
+	// If persistent key doesn't exist, enter initial election flow
 	if len(resp.Kvs) == 0 {
 		lf.etcdHealthy.Store(true)
 		lf.applyNoLeader(resp.Header.Revision, false)
 		if err := lf.tryToBecomeLeader(); err != nil {
 			return resp.Header.Revision, err
 		}
+		// Re-read to confirm
 		resp, err = lf.client.Get(ctx, lf.key)
 		if err != nil {
 			return 0, err
@@ -135,8 +163,17 @@ func (lf *LeaderFailover) reconcile() (int64, error) {
 		lf.applyNoLeader(resp.Header.Revision, false)
 		return resp.Header.Revision, nil
 	}
+
+	// Persistent key exists
 	lf.etcdHealthy.Store(true)
-	lf.applyLeaderValue(string(resp.Kvs[0].Value), resp.Header.Revision)
+	currentLeader := string(resp.Kvs[0].Value)
+
+	// If persistent key points to self but writeLock doesn't exist, log it
+	if currentLeader == lf.nodeID && !writeLockExists {
+		log.Printf("[Leader Failover] Persistent key points to %s but writeLock missing during reconcile", lf.nodeID)
+	}
+
+	lf.applyLeaderValue(currentLeader, resp.Header.Revision)
 	return resp.Header.Revision, nil
 }
 
@@ -177,7 +214,8 @@ func (lf *LeaderFailover) watchLeaderChangesFromRevision(revision int64) {
 			return
 		}
 		watchCtx, watchCancel := context.WithCancel(lf.ctx)
-		watchChan := lf.watcher.Watch(watchCtx, lf.key, clientv3.WithRev(revision))
+		// Use WithPrefix to watch both leader key and writeLock key
+		watchChan := lf.watcher.Watch(watchCtx, lf.key, clientv3.WithRev(revision), clientv3.WithPrefix())
 		healthCheck := time.NewTicker(healthCheckInterval)
 		watchFailed := false
 		for !watchFailed {
@@ -204,7 +242,15 @@ func (lf *LeaderFailover) watchLeaderChangesFromRevision(revision int64) {
 					if event.Kv != nil && event.Kv.ModRevision+1 > revision {
 						revision = event.Kv.ModRevision + 1
 					}
-					lf.handleWatchEvent(event)
+
+					eventKey := string(event.Kv.Key)
+
+					// Distinguish between leader key and writeLock key
+					if eventKey == lf.key {
+						lf.handleWatchEvent(event)
+					} else if eventKey == lf.writeLockKey {
+						lf.handleWriteLockEvent(event)
+					}
 				}
 			case <-healthCheck.C:
 				healthRevision, err := lf.healthCheck()
@@ -270,6 +316,29 @@ func (lf *LeaderFailover) handleWatchEvent(event *clientv3.Event) {
 	}
 }
 
+// handleWriteLockEvent handles writeLock key changes
+func (lf *LeaderFailover) handleWriteLockEvent(event *clientv3.Event) {
+	currentLeader := lf.getCurrentLeader()
+
+	switch event.Type {
+	case clientv3.EventTypePut:
+		// WriteLock updated, just log
+		log.Printf("[Leader Failover] WriteLock updated: %s", string(event.Kv.Value))
+
+	case clientv3.EventTypeDelete:
+		// WriteLock disappeared, old leader has stopped writing
+		log.Printf("[Leader Failover] WriteLock deleted, old leader has stopped writing")
+
+		// Only attempt immediate promotion if persistent key points to self and not already leader
+		if currentLeader == lf.nodeID && lf.State() == StateBackup {
+			log.Printf("[Leader Failover] Persistent key points to %s and writeLock is gone, attempting immediate promotion", lf.nodeID)
+
+			// Trigger immediate promotion (token already incremented in applyLeaderValue)
+			lf.becomeLeaderAsync(lf.promotionToken.Load())
+		}
+	}
+}
+
 func (lf *LeaderFailover) applyLeaderValue(newLeader string, revision int64) {
 	lf.roleUpdateMu.Lock()
 	defer lf.roleUpdateMu.Unlock()
@@ -283,6 +352,15 @@ func (lf *LeaderFailover) applyLeaderValue(newLeader string, revision int64) {
 	if oldLeader != newLeader {
 		log.Printf("[Leader Failover] Leader changed from %s to %s, current node %s", oldLeader, newLeader, lf.nodeID)
 	}
+
+	// Critical: if persistent key no longer points to self, immediately stop writeLock and step down
+	if oldLeader == lf.nodeID && newLeader != lf.nodeID {
+		log.Printf("[Leader Failover] Persistent key changed away from %s, stopping writeLock immediately", lf.nodeID)
+		lf.promotionToken.Add(1)
+		lf.transition(StateBackup) // This will call stopWriteLock if wasLeader
+		return
+	}
+
 	if newLeader == lf.nodeID {
 		// A healthy read after an Unknown period starts a fresh grace window.
 		if lf.State() == StateUnknown {
@@ -350,9 +428,24 @@ func (lf *LeaderFailover) becomeLeader(token int64) {
 	if lf.getCurrentLeader() != lf.nodeID || !lf.etcdHealthy.Load() {
 		return
 	}
+
+	// Start writeLock BEFORE becoming leader (only if etcd client exists)
+	if lf.client != nil {
+		if err := lf.startWriteLock(); err != nil {
+			log.Printf("[Leader Failover] Failed to start writeLock: %v, aborting promotion", err)
+			go lf.retryPromotion(token)
+			return
+		}
+	}
+
+	// Only set state to Leader after writeLock is successfully created
 	lf.state = StateLeader
-	lf.IsLeaderNode = true
-	log.Printf("[Leader Failover] Current node %s became LEADER", lf.nodeID)
+
+	if lf.client != nil {
+		log.Printf("[Leader Failover] Current node %s became LEADER with writeLock", lf.nodeID)
+	} else {
+		log.Printf("[Leader Failover] Current node %s became LEADER (no etcd client, writeLock skipped)", lf.nodeID)
+	}
 }
 
 func (lf *LeaderFailover) retryPromotion(token int64) {
@@ -374,8 +467,10 @@ func (lf *LeaderFailover) transition(state State) {
 	}
 	wasLeader := lf.state == StateLeader
 	lf.state = state
-	lf.IsLeaderNode = state == StateLeader
 	if wasLeader {
+		// Stop writeLock when losing leadership
+		lf.stopWriteLock()
+
 		// Leadership loss is intentionally lightweight. The mutex gates Kafka
 		// writes; S3 uploads are allowed to finish and are not cancelled.
 		ctx, cancel := context.WithTimeout(lf.ctx, lf.gracePeriod)
@@ -387,6 +482,10 @@ func (lf *LeaderFailover) transition(state State) {
 		}
 		log.Printf("[Leader Failover] Current node %s is no longer leader (state=%s)", lf.nodeID, state)
 	}
+	// Also stop writeLock when transitioning to Unknown state (even if not from Leader)
+	if state == StateUnknown {
+		lf.stopWriteLock()
+	}
 }
 
 func (lf *LeaderFailover) markUnknown(reason string) {
@@ -394,7 +493,7 @@ func (lf *LeaderFailover) markUnknown(reason string) {
 	// mutex. Any newly arriving write observes this immediately and is denied.
 	lf.etcdHealthy.Store(false)
 	log.Printf("[Leader Failover] %s; pausing Kafka writes", reason)
-	lf.transition(StateUnknown)
+	lf.transition(StateUnknown) // This will call stopWriteLock while holding mutex
 }
 
 func (lf *LeaderFailover) IsLeader() bool {
@@ -434,9 +533,118 @@ func (lf *LeaderFailover) updateLeaderValue(leader string, revision int64) bool 
 
 func (lf *LeaderFailover) Stop() error { lf.cancel(); return nil }
 
+// startWriteLock creates a lease and holds the writeLock key
+func (lf *LeaderFailover) startWriteLock() error {
+	lf.writeLockMu.Lock()
+	defer lf.writeLockMu.Unlock()
+
+	// Stop existing writeLock if running
+	if lf.writeLockCancel != nil {
+		lf.writeLockCancel()
+		lf.writeLockCancel = nil
+	}
+
+	// Create lease
+	lease := clientv3.NewLease(lf.client)
+	grantResp, err := lease.Grant(lf.ctx, lf.writeLockTTL)
+	if err != nil {
+		return fmt.Errorf("failed to create writeLock lease: %w", err)
+	}
+
+	lf.writeLockLease = lease
+	lf.writeLockLeaseID = grantResp.ID
+
+	// Write writeLock key
+	writeLockValue := fmt.Sprintf(`{"node_id":"%s","timestamp":%d}`,
+		lf.nodeID, time.Now().Unix())
+
+	ctx, cancel := context.WithTimeout(lf.ctx, 3*time.Second)
+	defer cancel()
+
+	_, err = lf.client.Put(ctx, lf.writeLockKey, writeLockValue,
+		clientv3.WithLease(lf.writeLockLeaseID))
+	if err != nil {
+		lease.Revoke(context.Background(), lf.writeLockLeaseID)
+		return fmt.Errorf("failed to write writeLock key: %w", err)
+	}
+
+	// Start KeepAlive
+	kaCtx, kaCancel := context.WithCancel(lf.ctx)
+	lf.writeLockCancel = kaCancel
+
+	keepAliveCh, err := lease.KeepAlive(kaCtx, lf.writeLockLeaseID)
+	if err != nil {
+		kaCancel()
+		lease.Revoke(context.Background(), lf.writeLockLeaseID)
+		return fmt.Errorf("failed to start writeLock KeepAlive: %w", err)
+	}
+
+	// Start KeepAlive processor goroutine
+	go lf.processWriteLockKeepAlive(keepAliveCh)
+
+	log.Printf("[Leader Failover] Started writeLock for node %s (lease %d, TTL %ds)",
+		lf.nodeID, lf.writeLockLeaseID, lf.writeLockTTL)
+
+	return nil
+}
+
+// processWriteLockKeepAlive handles writeLock KeepAlive responses
+func (lf *LeaderFailover) processWriteLockKeepAlive(keepAliveCh <-chan *clientv3.LeaseKeepAliveResponse) {
+	for {
+		select {
+		case <-lf.ctx.Done():
+			log.Printf("[Leader Failover] WriteLock KeepAlive stopped (context done)")
+			return
+		case ka := <-keepAliveCh:
+			if ka == nil {
+				// KeepAlive channel closed - could be intentional shutdown or lease loss
+				// Check if this is intentional shutdown
+				if lf.ctx.Err() != nil {
+					return
+				}
+				// Only mark unknown if we're still supposed to be leader
+				if lf.State() == StateLeader {
+					log.Printf("[Leader Failover] WriteLock lease lost for node %s, marking unknown", lf.nodeID)
+					lf.markUnknown("writeLock lease lost")
+				}
+				return
+			}
+			// KeepAlive successful, continue
+		}
+	}
+}
+
+// stopWriteLock stops writeLock and deletes the key
+func (lf *LeaderFailover) stopWriteLock() {
+	lf.writeLockMu.Lock()
+	defer lf.writeLockMu.Unlock()
+
+	// Stop KeepAlive goroutine
+	if lf.writeLockCancel != nil {
+		lf.writeLockCancel()
+		lf.writeLockCancel = nil
+	}
+
+	// Revoke lease (automatically deletes writeLock key)
+	if lf.writeLockLease != nil && lf.writeLockLeaseID != 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		_, err := lf.writeLockLease.Revoke(ctx, lf.writeLockLeaseID)
+		if err != nil {
+			log.Printf("[Leader Failover] Failed to revoke writeLock lease: %v", err)
+		} else {
+			log.Printf("[Leader Failover] Revoked writeLock lease %d for node %s",
+				lf.writeLockLeaseID, lf.nodeID)
+		}
+
+		lf.writeLockLeaseID = 0
+	}
+}
+
 func (lf *LeaderFailover) Close() error {
 	lf.closeOnce.Do(func() {
-		lf.markUnknown("leader manager is closing")
+		lf.markUnknown("leader manager is closing") // This will call stopWriteLock via transition
 		lf.cancel()
 		if lf.watcher != nil {
 			lf.closeErr = lf.watcher.Close()

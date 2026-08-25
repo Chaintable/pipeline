@@ -1,7 +1,6 @@
 package tracer
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -39,8 +38,6 @@ var (
 	BlockCtx               *ExtraInfo
 	BizChainID             string
 	Version                string
-	// Deprecated compatibility alias. It points at leader.GlobalManager.
-	LeaderManager *leader.Manager
 )
 
 func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, version string, s3TmpDir string) (err error) {
@@ -59,45 +56,24 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	return nil
 }
 
-// WriterRegistryConfig is retained for source compatibility. Writer
-// registration is now owned by the kubectl/node-manager workflow.
-type WriterRegistryConfig struct {
-	TTL              int64
-	NodeXBucket      string
-	ChainTableBucket string
-	Region           string
-	Brokers          []string
-	Topic            string
-}
-
 // SetupLeaderElection sets up manual leader election for the processors
-func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, version string, isBackup *bool, gracePeriod int, writerConfig *WriterRegistryConfig) error {
-	_ = version
-	_ = writerConfig
-	// Create a single leader manager for both processors
+func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int, writeLockTTL int64) error {
 	config := leader.ManagerConfig{
 		EtcdEndpoints: etcdEndpoints,
 		ElectionKey:   electionKey,
 		NodeID:        nodeID,
 		IsBackup:      isBackup,
 		GracePeriod:   time.Duration(gracePeriod) * time.Second,
+		WriteLockTTL:  writeLockTTL,
 		OnBecomeLeader: func() error {
-			// Update last block when becoming leader
 			log.Info("Updating last block info on leader transition")
-			var checkpointErrors []error
 			if NodeXPusher != nil {
 				if err := NodeXPusher.UpdateLastBlock(); err != nil {
 					log.Error("Failed to update NodeX last block", "err", err)
-					checkpointErrors = append(checkpointErrors, fmt.Errorf("update NodeX Kafka checkpoint: %w", err))
+					return fmt.Errorf("update NodeX Kafka checkpoint: %w", err)
 				}
 			}
-			if ChainTableBucketPusher != nil {
-				if err := ChainTableBucketPusher.UpdateLastBlock(); err != nil {
-					log.Error("Failed to update ChainTable last block", "err", err)
-					checkpointErrors = append(checkpointErrors, fmt.Errorf("update ChainTable Kafka checkpoint: %w", err))
-				}
-			}
-			return errors.Join(checkpointErrors...)
+			return nil
 		},
 		OnLoseLeader: func() error {
 			return nil
@@ -109,12 +85,10 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 		return fmt.Errorf("failed to create leader manager: %w", err)
 	}
 	leader.GlobalManager = manager
-	LeaderManager = manager
 
 	if err := leader.GlobalManager.Start(); err != nil {
 		_ = manager.Close()
 		leader.GlobalManager = nil
-		LeaderManager = nil
 		return fmt.Errorf("failed to start leader manager: %w", err)
 	}
 

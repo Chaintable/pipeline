@@ -36,7 +36,6 @@ func TestUnknownStateImmediatelyClosesKafkaGate(t *testing.T) {
 	lf := newStateTestFailover(0)
 	lf.updateLeaderValue("node-a", 1)
 	lf.state = StateLeader
-	lf.IsLeaderNode = true
 
 	lf.etcdHealthy.Store(false)
 	if lf.IsLeaderLocked() {
