@@ -548,7 +548,12 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		if t.config.EnablePreStateTracer {
 			stateDiff = t.prestateTracer.GetStateDiff(originRoot, root)
 		} else {
-			stateDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+			var err error
+			stateDiff, err = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+			if err != nil {
+				log.Crit("Failed to build state diff", "err", err)
+				return
+			}
 		}
 		BlockCtx.BlockDiff = stateDiff
 	} else {

@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/morph-l2/go-ethereum/common/hexutil"
 	"github.com/morph-l2/go-ethereum/core/tracing"
 	"github.com/morph-l2/go-ethereum/core/types"
-	"github.com/morph-l2/go-ethereum/log"
 )
 
 type RPCTracer struct {
@@ -93,9 +93,13 @@ func (t *RPCTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.DebankOutPut {
+func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte, codes map[common.Hash][]byte) (*ptypes.DebankOutPut, error) {
 	if originRoot != root {
-		t.currentBlock.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, nil, storages, nil, codes)
+		stateDiff, err := stateUpdateToStateDiff(originRoot, root, destructs, accounts, nil, storages, nil, codes)
+		if err != nil {
+			return nil, fmt.Errorf("build state diff: %w", err)
+		}
+		t.currentBlock.BlockDiff = stateDiff
 	} else {
 		t.currentBlock.BlockDiff = nil
 	}
@@ -110,8 +114,7 @@ func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destruct
 	if t.currentBlock.BlockDiff != nil {
 		stateDiffBytes, err = util.EncodeToRlp(t.currentBlock.BlockDiff)
 		if err != nil {
-			log.Error("Failed to encode state diff", "err", err)
-			stateDiffBytes = []byte{}
+			return nil, fmt.Errorf("encode state diff: %w", err)
 		}
 	} else {
 		stateDiffBytes = []byte{}
@@ -122,5 +125,5 @@ func (t *RPCTracer) GetOutPut(originRoot common.Hash, root common.Hash, destruct
 		Header:         t.currentBlock.BlockHeader,
 		StateDiff:      hexutil.Bytes(stateDiffBytes),
 		ValidationHash: t.currentBlock.BlockFile.Validation().ValidationHash,
-	}
+	}, nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/Chaintable/pipeline/writer"
 	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
+	statesnapshot "github.com/morph-l2/go-ethereum/core/state/snapshot"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/crypto"
 	"github.com/morph-l2/go-ethereum/log"
@@ -137,15 +138,15 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	return nil
 }
 
-func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
+func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) (*ptypes.BlockStorageDiff, error) {
 	stateDiff := &ptypes.BlockStorageDiff{}
 	for addrhash := range destructs {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		var account types.StateAccount
-		if err := rlp.DecodeBytes(v, &account); err != nil {
-			continue
+		account, err := statesnapshot.FullAccount(v)
+		if err != nil {
+			return nil, fmt.Errorf("decode slim account %s: %w", k, err)
 		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
@@ -161,7 +162,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 			if len(v) > 0 {
 				_, content, _, err := rlp.Split(v)
 				if err != nil {
-					log.Error("Failed to split storage", "err", err)
+					return nil, fmt.Errorf("decode storage account %s slot %s: %w", account, index, err)
 				}
 				value = uint256.NewInt(0).SetBytes(content)
 			}
@@ -189,7 +190,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	}
 	stateDiff.Hash = root
 	stateDiff.ParentHash = originRoot
-	return stateDiff
+	return stateDiff, nil
 }
 
 func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
