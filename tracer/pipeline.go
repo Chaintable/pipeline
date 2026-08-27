@@ -148,9 +148,19 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		if err != nil {
 			return nil, fmt.Errorf("decode slim account %s: %w", k, err)
 		}
+		if len(account.Root) != common.HashLength {
+			return nil, fmt.Errorf("decode slim account %s: storage root length %d", k, len(account.Root))
+		}
+		if len(account.KeccakCodeHash) != common.HashLength {
+			return nil, fmt.Errorf("decode slim account %s: code hash length %d", k, len(account.KeccakCodeHash))
+		}
+		balance, overflow := uint256.FromBig(account.Balance)
+		if balance == nil || overflow {
+			return nil, fmt.Errorf("decode slim account %s: invalid balance", k)
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  uint256.MustFromBig(account.Balance),
+			Balance:  balance,
 			Nonce:    account.Nonce,
 			CodeHash: common.BytesToHash(account.KeccakCodeHash),
 		})
@@ -160,9 +170,15 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		for index, v := range storage {
 			value := uint256.NewInt(0)
 			if len(v) > 0 {
-				_, content, _, err := rlp.Split(v)
+				content, rest, err := rlp.SplitString(v)
 				if err != nil {
 					return nil, fmt.Errorf("decode storage account %s slot %s: %w", account, index, err)
+				}
+				if len(rest) != 0 {
+					return nil, fmt.Errorf("decode storage account %s slot %s: %d trailing bytes", account, index, len(rest))
+				}
+				if len(content) > common.HashLength {
+					return nil, fmt.Errorf("decode storage account %s slot %s: value length %d", account, index, len(content))
 				}
 				value = uint256.NewInt(0).SetBytes(content)
 			}
