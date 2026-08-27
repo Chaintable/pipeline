@@ -296,3 +296,50 @@ func TestRPCTracerGetOutPutPropagatesStateDiffError(t *testing.T) {
 		t.Fatalf("GetOutPut() error = %q, want decode slim account context", err)
 	}
 }
+
+func FuzzStateUpdateToStateDiffDoesNotPanic(f *testing.F) {
+	validAccount := statesnapshot.SlimAccountRLP(
+		0,
+		big.NewInt(0),
+		types.EmptyRootHash,
+		crypto.Keccak256(nil),
+		nil,
+		0,
+	)
+	validStorage, err := rlp.EncodeToBytes([]byte{0x2a})
+	if err != nil {
+		f.Fatalf("encode storage seed: %v", err)
+	}
+	f.Add(true, validAccount)
+	f.Add(true, []byte{0xff})
+	f.Add(false, validStorage)
+	f.Add(false, []byte{0xc1, 0x01})
+	f.Fuzz(func(t *testing.T, accountInput bool, data []byte) {
+		addressHash := common.HexToHash("0x01")
+		if accountInput {
+			_, _ = stateUpdateToStateDiff(
+				common.HexToHash("0x02"),
+				common.HexToHash("0x03"),
+				nil,
+				map[common.Hash][]byte{addressHash: data},
+				nil,
+				nil,
+				nil,
+				nil,
+			)
+			return
+		}
+		_, _ = stateUpdateToStateDiff(
+			common.HexToHash("0x02"),
+			common.HexToHash("0x03"),
+			nil,
+			nil,
+			nil,
+			map[common.Hash]map[common.Hash][]byte{
+				addressHash: {common.HexToHash("0x04"): data},
+			},
+			nil,
+			nil,
+		)
+	})
+}
