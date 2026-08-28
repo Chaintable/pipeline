@@ -11,6 +11,7 @@ import (
 	"github.com/Chaintable/pipeline/writer"
 	"github.com/holiman/uint256"
 	"github.com/morph-l2/go-ethereum/common"
+	statesnapshot "github.com/morph-l2/go-ethereum/core/state/snapshot"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/crypto"
 	"github.com/morph-l2/go-ethereum/log"
@@ -137,19 +138,29 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 	return nil
 }
 
-func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
+func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) (*ptypes.BlockStorageDiff, error) {
 	stateDiff := &ptypes.BlockStorageDiff{}
 	for addrhash := range destructs {
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		var account types.StateAccount
-		if err := rlp.DecodeBytes(v, &account); err != nil {
-			continue
+		account, err := statesnapshot.FullAccount(v)
+		if err != nil {
+			return nil, fmt.Errorf("decode slim account %s: %w", k, err)
+		}
+		if len(account.Root) != common.HashLength {
+			return nil, fmt.Errorf("decode slim account %s: storage root length %d", k, len(account.Root))
+		}
+		if len(account.KeccakCodeHash) != common.HashLength {
+			return nil, fmt.Errorf("decode slim account %s: code hash length %d", k, len(account.KeccakCodeHash))
+		}
+		balance, overflow := uint256.FromBig(account.Balance)
+		if balance == nil || overflow {
+			return nil, fmt.Errorf("decode slim account %s: invalid balance", k)
 		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  uint256.MustFromBig(account.Balance),
+			Balance:  balance,
 			Nonce:    account.Nonce,
 			CodeHash: common.BytesToHash(account.KeccakCodeHash),
 		})
@@ -159,9 +170,15 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		for index, v := range storage {
 			value := uint256.NewInt(0)
 			if len(v) > 0 {
-				_, content, _, err := rlp.Split(v)
+				content, rest, err := rlp.SplitString(v)
 				if err != nil {
-					log.Error("Failed to split storage", "err", err)
+					return nil, fmt.Errorf("decode storage account %s slot %s: %w", account, index, err)
+				}
+				if len(rest) != 0 {
+					return nil, fmt.Errorf("decode storage account %s slot %s: %d trailing bytes", account, index, len(rest))
+				}
+				if len(content) > common.HashLength {
+					return nil, fmt.Errorf("decode storage account %s slot %s: value length %d", account, index, len(content))
 				}
 				value = uint256.NewInt(0).SetBytes(content)
 			}
@@ -189,7 +206,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	}
 	stateDiff.Hash = root
 	stateDiff.ParentHash = originRoot
-	return stateDiff
+	return stateDiff, nil
 }
 
 func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
