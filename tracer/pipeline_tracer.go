@@ -309,14 +309,15 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 }
 
 // for arb chain
-func (t *PipelineTracer) OnArbGenesisBlock(block *types.Block, blockDiff *ptypes.BlockStorageDiff) {
-	t.OnGenesisBlockInner(block, nil, blockDiff)
+func (t *PipelineTracer) OnArbGenesisBlock(block *types.Block, finalState types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
+	t.OnGenesisBlockInner(block, finalState, blockDiff)
 }
 
 func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
+	txs, traces := BuildGenesisSyntheticTransactions(alloc)
 
 	// 内部s3
 	header := util.BuildPilelineBlockHeader(block)
@@ -341,9 +342,9 @@ func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.Gen
 	// 业务s3
 	blockFile := &ptypes.BlockFile{
 		Block:            util.BuildPipelineBlock(block),
-		Txs:              make([]ptypes.Transaction, 0),
+		Txs:              txs,
 		Events:           make([]ptypes.Event, 0),
-		Traces:           make([]ptypes.Trace, 0),
+		Traces:           traces,
 		ErrorEvents:      make([]ptypes.Event, 0),
 		ErrorTraces:      make([]ptypes.Trace, 0),
 		StorageContracts: make([]string, 0),
