@@ -304,12 +304,15 @@ type Trace struct {
 
 | Value | Description |
 |-------|-------------|
-| `create` | Contract creation (CREATE/CREATE2) |
+| `create` | Contract creation. Both CREATE and CREATE2 map here; the opcode is **not** distinguished |
 | `suicide` | Self-destruct (SELFDESTRUCT) |
 | `call` | Normal call (CALL/DELEGATECALL/STATICCALL/CALLCODE) |
 | `empty` | Empty/no-op trace |
 
 **CallType Values:**
+
+Only populated when `CallCreateType` is `call`. For `create`, `suicide` and `empty` traces
+`CallType` is the empty string.
 
 | Value | Description |
 |-------|-------------|
@@ -317,8 +320,6 @@ type Trace struct {
 | `delegatecall` | DELEGATECALL opcode |
 | `staticcall` | STATICCALL opcode |
 | `callcode` | CALLCODE opcode |
-| `create` | CREATE opcode |
-| `create2` | CREATE2 opcode |
 
 **Example:**
 ```json
