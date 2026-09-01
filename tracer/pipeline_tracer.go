@@ -215,6 +215,19 @@ func (t *PipelineTracer) OnBlockStart(block *types.Block) {
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
+	if BlockCtx == nil {
+		return
+	}
+	defer metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
+
+	// A failed block must never produce pipeline artifacts. The next block start
+	// replaces BlockCtx, so only discard the in-flight transaction tracer here.
+	if blockErr != nil {
+		t.callTracer = nil
+		log.Error("Skip failed block", "number", BlockCtx.BlockNumber, "hash", BlockCtx.BlockHash, "err", blockErr)
+		return
+	}
+
 	// empty block process
 	if !BlockCtx.Committed {
 		t.OnCommit(BlockCtx.BlockHeader.StateRoot, BlockCtx.BlockHeader.StateRoot, nil, nil, nil, nil, nil, nil)
@@ -230,7 +243,6 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 			log.Error("Failed to push kafka", "err", err, "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks)
 		}
 	}
-	metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
 }
 
 // vm.EVMLogger interface implementation

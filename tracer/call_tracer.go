@@ -240,6 +240,9 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 }
 
 func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+	if len(t.callstack) == 0 {
+		return
+	}
 	if op == vm.SSTORE {
 		t.callstack[len(t.callstack)-1].SelfStorageChange = true
 		t.callstack[len(t.callstack)-1].StorageChange = true
