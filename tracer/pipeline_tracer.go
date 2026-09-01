@@ -35,15 +35,16 @@ type PipelineTracer struct {
 }
 
 type pipelineTracerConfig struct {
-	Region               string   `json:"region"`
-	NodeXBucket          string   `json:"node_x_bucket"`
-	ChainTableBucket     string   `json:"chain_table_bucket"`
-	Brokers              []string `json:"brokers"`
-	Topic                string   `json:"topic"`
-	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
-	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
-	Version              string   `json:"version"`
+	Region                         string   `json:"region"`
+	NodeXBucket                    string   `json:"node_x_bucket"`
+	ChainTableBucket               string   `json:"chain_table_bucket"`
+	Brokers                        []string `json:"brokers"`
+	Topic                          string   `json:"topic"`
+	S3TempDir                      string   `json:"s3_temp_dir"`
+	IsBackup                       *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
+	EnablePreStateTracer           bool     `json:"enable_prestate_tracer"`
+	EnableOrbitGenesisTransactions bool     `json:"enable_orbit_genesis_transactions"`
+	Version                        string   `json:"version"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
@@ -99,6 +100,10 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 		config: config,
 	}
 	return t, nil
+}
+
+func (t *PipelineTracer) EnableOrbitGenesisTransactions() bool {
+	return t.config.EnableOrbitGenesisTransactions
 }
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
