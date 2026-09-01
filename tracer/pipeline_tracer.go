@@ -314,7 +314,11 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 }
 
 // for arb chain
-func (t *PipelineTracer) OnArbGenesisBlock(block *types.Block, finalState types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
+func (t *PipelineTracer) OnArbGenesisBlock(block *types.Block, blockDiff *ptypes.BlockStorageDiff) {
+	t.OnGenesisBlockInner(block, nil, blockDiff)
+}
+
+func (t *PipelineTracer) OnArbGenesisBlockV2(block *types.Block, finalState types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
 	t.OnGenesisBlockInner(block, finalState, blockDiff)
 }
 
