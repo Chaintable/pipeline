@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,15 +36,16 @@ type PipelineTracer struct {
 }
 
 type pipelineTracerConfig struct {
-	Region               string   `json:"region"`
-	NodeXBucket          string   `json:"node_x_bucket"`
-	ChainTableBucket     string   `json:"chain_table_bucket"`
-	Brokers              []string `json:"brokers"`
-	Topic                string   `json:"topic"`
-	S3TempDir            string   `json:"s3_temp_dir"`
-	IsBackup             *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
-	EnablePreStateTracer bool     `json:"enable_prestate_tracer"`
-	Version              string   `json:"version"`
+	Region                         string   `json:"region"`
+	NodeXBucket                    string   `json:"node_x_bucket"`
+	ChainTableBucket               string   `json:"chain_table_bucket"`
+	Brokers                        []string `json:"brokers"`
+	Topic                          string   `json:"topic"`
+	S3TempDir                      string   `json:"s3_temp_dir"`
+	IsBackup                       *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
+	EnablePreStateTracer           bool     `json:"enable_prestate_tracer"`
+	EnableOrbitGenesisTransactions bool     `json:"enable_orbit_genesis_transactions"`
+	Version                        string   `json:"version"`
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
@@ -99,6 +101,10 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 		config: config,
 	}
 	return t, nil
+}
+
+func (t *PipelineTracer) EnableOrbitGenesisTransactions() bool {
+	return t.config.EnableOrbitGenesisTransactions
 }
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
@@ -236,7 +242,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange, nil)
 		if err == nil {
 			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
@@ -310,13 +316,29 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 // for arb chain
 func (t *PipelineTracer) OnArbGenesisBlock(block *types.Block, blockDiff *ptypes.BlockStorageDiff) {
+	if blockDiff == nil {
+		blockDiff = new(ptypes.BlockStorageDiff)
+	}
 	t.OnGenesisBlockInner(block, nil, blockDiff)
+}
+
+func (t *PipelineTracer) OnArbGenesisBlockV2(block *types.Block, finalState types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
+	if blockDiff == nil {
+		blockDiff = new(ptypes.BlockStorageDiff)
+	}
+	t.OnGenesisBlockInner(block, finalState, blockDiff)
 }
 
 func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.GenesisAlloc, blockDiff *ptypes.BlockStorageDiff) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
 	}
+	externalBlockDiff := blockDiff != nil
+	syntheticState := alloc
+	if !externalBlockDiff && syntheticState == nil {
+		syntheticState = types.GenesisAlloc{}
+	}
+	txs, traces := BuildGenesisSyntheticTransactions(syntheticState)
 
 	// 内部s3
 	header := util.BuildPilelineBlockHeader(block)
@@ -341,22 +363,39 @@ func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.Gen
 	// 业务s3
 	blockFile := &ptypes.BlockFile{
 		Block:            util.BuildPipelineBlock(block),
-		Txs:              make([]ptypes.Transaction, 0),
+		Txs:              txs,
 		Events:           make([]ptypes.Event, 0),
-		Traces:           make([]ptypes.Trace, 0),
+		Traces:           traces,
 		ErrorEvents:      make([]ptypes.Event, 0),
 		ErrorTraces:      make([]ptypes.Trace, 0),
 		StorageContracts: make([]string, 0),
 	}
-	for _, diff := range blockDiff.StorageDiff {
-		blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(diff.Address.Hex()))
+	if externalBlockDiff {
+		for _, diff := range blockDiff.StorageDiff {
+			blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(diff.Address.Hex()))
+		}
+	} else {
+		sortedAddrs := make([]common.Address, 0, len(alloc))
+		for addr := range alloc {
+			sortedAddrs = append(sortedAddrs, addr)
+		}
+		sort.Slice(sortedAddrs, func(i, j int) bool {
+			return sortedAddrs[i].Hex() < sortedAddrs[j].Hex()
+		})
+		for _, addr := range sortedAddrs {
+			if len(alloc[addr].Storage) > 0 {
+				blockFile.StorageContracts = append(blockFile.StorageContracts, strings.ToLower(addr.Hex()))
+			}
+		}
 	}
+
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
 	if err != nil {
 		log.Crit("Failed to upload block files to s3", "err", err)
 	}
-	log.Info("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64())
+	log.Info("3.upload block file", "block hash", header.Hash.Hex(), "block number", header.Number.ToInt().Uint64(),
+		"txs", len(blockFile.Txs), "traces", len(blockFile.Traces))
 
 	// upload block file validation
 	err = uploadblockFileValidation(blockFile)
@@ -378,7 +417,7 @@ func (t *PipelineTracer) OnGenesisBlockInner(block *types.Block, alloc types.Gen
 		},
 	}
 
-	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
+	err = NodeXPusher.PushBlockChangeNotification(blockChanges, nil)
 	if err != nil {
 		log.Crit("Failed to push block change notification", "err", err)
 	}
