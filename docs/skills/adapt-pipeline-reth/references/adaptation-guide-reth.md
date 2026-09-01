@@ -72,9 +72,22 @@ impl From<&CallLog> for DebankEvent { ... }
 ```
 
 The conversion from `CallTraceNode` handles:
-- Mapping `CallKind` (Call/StaticCall/DelegateCall/Create/Create2) to Debank's `call_create_type` and `call_type`
+- Mapping `CallKind` to Debank's `call_create_type` and `call_type`
 - Detecting `SSTORE` opcodes in trace steps for `storage_change` flags
 - Error message formatting matching go-ethereum's error strings
+
+The `CallKind` mapping must match `tracer/call_tracer.go` (`callTracer.ToTrace`) exactly:
+
+| `CallKind` | `call_create_type` | `call_type` |
+|------------|--------------------|-------------|
+| `Call` / `StaticCall` / `CallCode` / `DelegateCall` / `AuthCall` | `"call"` | lowercased kind (`"call"`, `"staticcall"`, ...) |
+| `Create` / `Create2` | `"create"` | `""` |
+
+`Create2` maps to `"create"`, **not** `"create2"` — the Go tracer collapses both opcodes into a
+single high-level type, and downstream consumers filter contract creation on `type == "create"`.
+Emitting `"create2"` silently hides CREATE2 deployments from those consumers. `call_type` is left
+empty for creation frames for the same reason. Selfdestructs are not `CallKind` values; they are
+synthesized separately with `call_create_type = "suicide"`.
 
 **Trace tree building:**
 

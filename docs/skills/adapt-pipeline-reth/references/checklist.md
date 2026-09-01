@@ -10,6 +10,7 @@ Use this checklist to verify the Pipeline adaptation is complete. Replace `$TARG
 - [ ] JSON types: `DebankBlock`, `DebankTransaction`, `DebankTrace`, `DebankEvent`
 - [ ] Output types: `BlockFile`, `BlockValidation`, `DebankOutPut`
 - [ ] `From<&CallTraceNode> for DebankTrace` implementation
+- [ ] `CallKind::Create` **and** `CallKind::Create2` both map to `call_create_type = "create"` with an empty `call_type` (must not emit `"create2"`)
 - [ ] `From<&CallLog> for DebankEvent` implementation
 - [ ] `build_debank_traces()` function
 - [ ] `get_storage_diffs_from_cache()` function
@@ -95,4 +96,8 @@ grep "sha1" $TARGET/crates/rpc/rpc-eth-types/Cargo.toml
 # Check ID compatibility
 grep -n "Md5::new" $TARGET/crates/rpc/rpc-eth-types/src/debank.rs
 grep -n "Sha1::new" $TARGET/crates/rpc/rpc-eth-types/src/debank.rs
+
+# Check CallKind mapping: must print nothing. A hit means CREATE2 is emitted as
+# type="create2" instead of "create", which hides CREATE2 deployments downstream.
+grep -n '"create2"' $TARGET/crates/rpc/rpc-eth-types/src/debank.rs
 ```
