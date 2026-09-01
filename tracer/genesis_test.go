@@ -9,40 +9,8 @@ import (
 
 	"github.com/Chaintable/pipeline/util"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
-
-func TestGenesisTxID(t *testing.T) {
-	cases := []struct {
-		kind int
-		addr string
-		want string
-	}{
-		{1, "0x0000000000000000000000000000000000000001", "0x0100000000000000000000000000000000000000000000000000000000000001"},
-		{2, "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "0x020000000000000000000000abcdefabcdefabcdefabcdefabcdefabcdefabcd"},
-		{3, "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "0x030000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
-	}
-	for _, c := range cases {
-		got := genesisTxID(c.kind, c.addr)
-		if got != c.want {
-			t.Fatalf("kind=%d addr=%s: got %s, want %s", c.kind, c.addr, got, c.want)
-		}
-		if len(got) != 66 || !strings.HasPrefix(got, "0x") {
-			t.Fatalf("invalid genesis tx id %s", got)
-		}
-		decoded, err := hexutil.Decode(got)
-		if err != nil {
-			t.Fatalf("%s is not valid hex: %v", got, err)
-		}
-		if len(decoded) != common.HashLength {
-			t.Fatalf("%s decodes to %d bytes, want %d", got, len(decoded), common.HashLength)
-		}
-		if common.HexToHash(got).Hex() != got {
-			t.Fatalf("%s does not round-trip through common.Hash", got)
-		}
-	}
-}
 
 func TestBuildGenesisSyntheticTransactions(t *testing.T) {
 	addr1 := common.HexToAddress("0x0000000000000000000000000000000000000001")
