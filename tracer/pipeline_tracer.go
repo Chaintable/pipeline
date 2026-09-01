@@ -310,8 +310,13 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	defer func() {
 		metrics.BlockTxExecutionTimer.UpdateSince(BlockCtx.TxStartTime)
 	}()
-	t.callTracer.OnTxEnd(receipt, err)
+	if t.callTracer != nil {
+		t.callTracer.OnTxEnd(receipt, err)
+	}
 	t.callTracer = nil
+	if err != nil || receipt == nil {
+		return
+	}
 
 	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
