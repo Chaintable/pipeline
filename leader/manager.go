@@ -26,6 +26,7 @@ type ManagerConfig struct {
 	OnBecomeLeader func() error
 	OnLoseLeader   func() error
 	GracePeriod    time.Duration
+	WriteLockTTL   int64 // TTL for writeLock key in seconds
 }
 
 func NewManager(cfg *ManagerConfig) (*Manager, error) {
@@ -41,10 +42,11 @@ func NewManager(cfg *ManagerConfig) (*Manager, error) {
 	} else {
 		// Use etcd-based failover
 		electionCfg := Config{
-			Endpoints:   cfg.EtcdEndpoints,
-			Key:         cfg.ElectionKey,
-			NodeID:      cfg.NodeID,
-			GracePeriod: cfg.GracePeriod,
+			Endpoints:    cfg.EtcdEndpoints,
+			Key:          cfg.ElectionKey,
+			NodeID:       cfg.NodeID,
+			GracePeriod:  cfg.GracePeriod,
+			WriteLockTTL: cfg.WriteLockTTL,
 		}
 
 		callbacks := LeaderCallbacks{
@@ -92,6 +94,19 @@ func (m *Manager) IsLeader() bool {
 	}
 	if m.LeaderFailover != nil {
 		return m.LeaderFailover.IsLeader()
+	}
+	return false
+}
+
+// IsLeaderLocked is used by write paths that already hold Lock. It avoids a
+// recursive RWMutex acquisition while keeping the Kafka gate atomic with the
+// role transition.
+func (m *Manager) IsLeaderLocked() bool {
+	if m.ManualMode {
+		return !m.IsManualBackup
+	}
+	if m.LeaderFailover != nil {
+		return m.LeaderFailover.IsLeaderLocked()
 	}
 	return false
 }
