@@ -26,12 +26,13 @@ import (
 
 	ptypes "github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 )
+
+const parentCallFailedError = "parent call failed"
 
 type callFrame struct {
 	Type         vm.OpCode       `json:"-"`
@@ -42,8 +43,8 @@ type callFrame struct {
 	Input        []byte          `json:"input" rlp:"optional"`
 	Output       []byte          `json:"output,omitempty" rlp:"optional"`
 	Error        string          `json:"error,omitempty" rlp:"optional"`
-	RevertReason string          `json:"revertReason,omitempty"`
 	ParentFailed bool            `json:"-"` // Indicates if the parent call failed
+	Precompile   bool            `json:"-"`
 	Calls        []callFrame     `json:"calls,omitempty" rlp:"optional"`
 	Logs         []ptypes.Event  `json:"logs,omitempty" rlp:"optional"`
 
@@ -66,39 +67,67 @@ func (f callFrame) failed() bool {
 	return len(f.Error) > 0
 }
 
-func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
-	output = common.CopyBytes(output)
-	// Clear error if tx wasn't reverted. This happened
-	// for pre-homestead contract storage OOG.
-	if err != nil && !reverted {
-		err = nil
-	}
-	if err == nil {
-		f.Output = output
-		return
-	}
-	f.Error = err.Error()
-	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
-		f.To = nil
-	}
-	if !errors.Is(err, vm.ErrExecutionReverted) || len(output) == 0 {
-		return
-	}
-	f.Output = output
-	if len(output) < 4 {
-		return
-	}
-	if unpacked, err := abi.UnpackRevert(output); err == nil {
-		f.RevertReason = unpacked
+func (f *callFrame) processOutput(output []byte, err error) {
+	f.Output = common.CopyBytes(output)
+	if err != nil {
+		f.Error = formatTraceError(err, f.Precompile)
 	}
 }
 
+func formatTraceError(err error, precompile bool) string {
+	switch {
+	case errors.Is(err, vm.ErrExecutionReverted):
+		return "Reverted"
+	case errors.Is(err, vm.ErrOutOfGas),
+		errors.Is(err, vm.ErrCodeStoreOutOfGas),
+		errors.Is(err, vm.ErrGasUintOverflow):
+		return "Out of gas"
+	case errors.Is(err, vm.ErrInsufficientBalance):
+		return "Insufficient balance for transfer"
+	case errors.Is(err, vm.ErrInvalidJump):
+		return "Bad jump destination"
+	case errors.Is(err, vm.ErrDepth):
+		return "CallTooDeep"
+	case errors.Is(err, vm.ErrContractAddressCollision):
+		return "CreateCollision"
+	case errors.Is(err, vm.ErrWriteProtection):
+		return "StateChangeDuringStaticCall"
+	case errors.Is(err, vm.ErrReturnDataOutOfBounds):
+		return "OutOfOffset"
+	case errors.Is(err, vm.ErrNonceUintOverflow):
+		return "NonceOverflow"
+	case errors.Is(err, vm.ErrMaxCodeSizeExceeded):
+		return "CreateContractSizeLimit"
+	case errors.Is(err, vm.ErrMaxInitCodeSizeExceeded):
+		return "CreateInitCodeSizeLimit"
+	case errors.Is(err, vm.ErrInvalidCode):
+		return "CreateContractStartingWithEF"
+	}
+	var invalidOpcode *vm.ErrInvalidOpCode
+	if errors.As(err, &invalidOpcode) {
+		return "Bad instruction"
+	}
+	var stackOverflow *vm.ErrStackOverflow
+	if errors.As(err, &stackOverflow) {
+		return "Out of stack"
+	}
+	var stackUnderflow *vm.ErrStackUnderflow
+	if errors.As(err, &stackUnderflow) {
+		return "StackUnderflow"
+	}
+	if precompile {
+		return "Built-in failed"
+	}
+	return err.Error()
+}
+
 type callTracer struct {
-	callstack []callFrame
-	gasLimit  uint64
-	depth     int
-	interrupt atomic.Bool // Atomic flag to signal execution interruption
-	reason    error       // Textual reason for the interruption
+	callstack           []callFrame
+	gasLimit            uint64
+	depth               int
+	interrupt           atomic.Bool // Atomic flag to signal execution interruption
+	reason              error       // Textual reason for the interruption
+	precompileAddresses map[common.Address]struct{}
 
 	txID string
 
@@ -107,16 +136,28 @@ type callTracer struct {
 }
 
 func newCallTracerRaw(ChangeContracts map[common.Address]struct{}, BlockFile *ptypes.BlockFile) *callTracer {
-	t := &callTracer{callstack: make([]callFrame, 0, 1), ChangeContracts: ChangeContracts, BlockFile: BlockFile}
+	t := &callTracer{
+		callstack:           make([]callFrame, 0, 1),
+		precompileAddresses: make(map[common.Address]struct{}),
+		ChangeContracts:     ChangeContracts,
+		BlockFile:           BlockFile,
+	}
 	return t
+}
+
+func (t *callTracer) isPrecompile(address common.Address) bool {
+	_, ok := t.precompileAddresses[address]
+	return ok
 }
 
 func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	CallCreateType := ""
 	CallType := ""
 	switch f.Type {
-	case vm.CREATE, vm.CREATE2:
+	case vm.CREATE:
 		CallCreateType = strings.ToLower(vm.CREATE.String())
+	case vm.CREATE2:
+		CallCreateType = strings.ToLower(vm.CREATE2.String())
 	case vm.SELFDESTRUCT:
 		CallCreateType = "suicide"
 	case vm.CALL, vm.STATICCALL, vm.CALLCODE, vm.DELEGATECALL:
@@ -136,9 +177,8 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 	err := ""
 	if f.failed() {
 		err = f.Error
-		if f.RevertReason != "" {
-			err = fmt.Sprintf("%s: %s", f.Error, f.RevertReason)
-		}
+	} else if f.ParentFailed {
+		err = parentCallFailedError
 	}
 	return ptypes.Trace{
 		ID:                f.TraceID,
@@ -176,6 +216,12 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 	if t.interrupt.Load() {
 		return
 	}
+	if env != nil {
+		rules := env.ChainConfig().Rules(env.Context.BlockNumber, env.Context.Random != nil, env.Context.Time)
+		for _, address := range vm.ActivePrecompiles(rules) {
+			t.precompileAddresses[address] = struct{}{}
+		}
+	}
 
 	toCopy := to
 	typ := vm.CALL
@@ -183,12 +229,13 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 		typ = vm.CREATE
 	}
 	call := callFrame{
-		Type:  typ,
-		From:  from,
-		To:    &toCopy,
-		Input: common.CopyBytes(input),
-		Gas:   t.gasLimit,
-		Value: value,
+		Type:       typ,
+		From:       from,
+		To:         &toCopy,
+		Input:      common.CopyBytes(input),
+		Gas:        t.gasLimit,
+		Value:      value,
+		Precompile: t.isPrecompile(to),
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -198,8 +245,7 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 		return
 	}
 	t.callstack[0].GasUsed = gasUsed
-	reverted := err != nil && errors.Is(err, vm.ErrExecutionReverted)
-	t.callstack[0].processOutput(output, err, reverted)
+	t.callstack[0].processOutput(output, err)
 }
 
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
@@ -210,12 +256,13 @@ func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.
 
 	toCopy := to
 	call := callFrame{
-		Type:  typ,
-		From:  from,
-		To:    &toCopy,
-		Input: common.CopyBytes(input),
-		Gas:   gas,
-		Value: value,
+		Type:       typ,
+		From:       from,
+		To:         &toCopy,
+		Input:      common.CopyBytes(input),
+		Gas:        gas,
+		Value:      value,
+		Precompile: t.isPrecompile(to),
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -233,10 +280,36 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	size -= 1
 
 	call.GasUsed = gasUsed
-	reverted := err != nil && errors.Is(err, vm.ErrExecutionReverted)
-	call.processOutput(output, err, reverted)
+	call.processOutput(output, err)
 	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
+}
+
+// CaptureEarlyExit records CALL/CREATE attempts rejected before the legacy
+// EVMLogger CaptureEnter hook is reached.
+func (t *callTracer) CaptureEarlyExit(depth int, typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, gasUsed uint64, err error) {
+	if t.interrupt.Load() {
+		return
+	}
+	toCopy := to
+	call := callFrame{
+		Type:       typ,
+		From:       from,
+		To:         &toCopy,
+		Input:      common.CopyBytes(input),
+		Gas:        gas,
+		GasUsed:    gasUsed,
+		Value:      value,
+		Precompile: t.isPrecompile(to),
+	}
+	call.processOutput(nil, err)
+	if depth == 0 || len(t.callstack) == 0 {
+		t.callstack = append(t.callstack, call)
+		return
+	}
+	parent := &t.callstack[len(t.callstack)-1]
+	call.PosInParentTrace = len(parent.Calls) + len(parent.Logs)
+	parent.Calls = append(parent.Calls, call)
 }
 
 func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
@@ -361,27 +434,33 @@ func setStorageChange(cf *callFrame, ChangeContracts map[common.Address]struct{}
 }
 
 func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
-	for i := range cf.Calls {
-		cf.Calls[i].ParentTraceID = cf.TraceID
-		cf.Calls[i].TraceID = util.ToHash([]string{t.txID, cf.TraceID, fmt.Sprintf("%d", cf.Calls[i].PosInParentTrace)})
-		t.addTraceAndLog(&cf.Calls[i], childTraceAddress(traceAddress, int64(i)))
-	}
-	for i := range cf.Logs {
-		cf.Logs[i].ParentTraceID = cf.TraceID
-		cf.Logs[i].ID = util.ToHash([]string{cf.Logs[i].ParentTraceID, fmt.Sprintf("%d", cf.Logs[i].Position)})
+	callIndex, logIndex := 0, 0
+	for callIndex < len(cf.Calls) || logIndex < len(cf.Logs) {
+		if logIndex >= len(cf.Logs) || (callIndex < len(cf.Calls) && cf.Calls[callIndex].PosInParentTrace < int(cf.Logs[logIndex].Position)) {
+			child := &cf.Calls[callIndex]
+			child.ParentTraceID = cf.TraceID
+			child.TraceID = util.ToHash([]string{t.txID, cf.TraceID, fmt.Sprintf("%d", child.PosInParentTrace)})
+			childAddress := childTraceAddress(traceAddress, int64(callIndex))
+			if child.failed() || child.ParentFailed {
+				t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(child, childAddress))
+			} else {
+				t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(child, childAddress))
+			}
+			t.addTraceAndLog(child, childAddress)
+			callIndex++
+			continue
+		}
+
+		event := &cf.Logs[logIndex]
+		event.ParentTraceID = cf.TraceID
+		event.ID = util.ToHash([]string{event.ParentTraceID, fmt.Sprintf("%d", event.Position)})
 		if cf.failed() || cf.ParentFailed {
-			cf.Logs[i].LogIndex = 0
-			t.BlockFile.ErrorEvents = append(t.BlockFile.ErrorEvents, cf.Logs[i])
+			event.LogIndex = 0
+			t.BlockFile.ErrorEvents = append(t.BlockFile.ErrorEvents, *event)
 		} else {
-			t.BlockFile.Events = append(t.BlockFile.Events, cf.Logs[i])
+			t.BlockFile.Events = append(t.BlockFile.Events, *event)
 		}
-	}
-	for i := range cf.Calls {
-		if cf.Calls[i].failed() {
-			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
-		} else {
-			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
-		}
+		logIndex++
 	}
 }
 

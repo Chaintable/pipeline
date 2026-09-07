@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -139,10 +140,27 @@ func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID stri
 
 func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) *ptypes.BlockStorageDiff {
 	stateDiff := &ptypes.BlockStorageDiff{}
+	accountOrigins := make(map[common.Hash][]byte, len(accountsOrigin))
+	for address, account := range accountsOrigin {
+		accountOrigins[crypto.Keccak256Hash(address[:])] = account
+	}
+	storageOrigins := make(map[common.Hash]map[common.Hash][]byte, len(storagesOrigin))
+	for address, storage := range storagesOrigin {
+		storageOrigins[crypto.Keccak256Hash(address[:])] = storage
+	}
 	for addrhash := range destructs {
+		if _, resurrected := accounts[addrhash]; resurrected {
+			continue
+		}
+		if origin, existed := accountOrigins[addrhash]; !existed || len(origin) == 0 {
+			continue
+		}
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
+		if origin, ok := accountOrigins[k]; ok && bytes.Equal(origin, v) {
+			continue
+		}
 		account, _ := types.FullAccount(v)
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
@@ -152,8 +170,14 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		})
 	}
 	for account, storage := range storages {
+		if len(storage) == 0 {
+			continue
+		}
 		Values := make([]ptypes.IndexValuePair, 0, len(storage))
 		for index, v := range storage {
+			if origin, ok := storageOrigins[account][index]; ok && bytes.Equal(origin, v) {
+				continue
+			}
 			value := uint256.NewInt(0)
 			if len(v) > 0 {
 				_, content, _, err := rlp.Split(v)
@@ -167,10 +191,12 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 				Value: value,
 			})
 		}
-		stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
-			Address: account,
-			Values:  Values,
-		})
+		if len(Values) > 0 {
+			stateDiff.StorageDiff = append(stateDiff.StorageDiff, ptypes.AccountStorageDiff{
+				Address: account,
+				Values:  Values,
+			})
+		}
 	}
 	for hash, code := range codes {
 		stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
@@ -202,7 +228,7 @@ func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStora
 			Nonce:    acc.Nonce,
 			CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
 		})
-		if len(acc.Code) > 0 {
+		if acc.Code != nil {
 			diff.NewCodes = append(diff.NewCodes, ptypes.NewCode{
 				CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
 				Code:     acc.Code,
@@ -219,10 +245,12 @@ func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStora
 				Value: value,
 			})
 		}
-		diff.StorageDiff = append(diff.StorageDiff, ptypes.AccountStorageDiff{
-			Address: crypto.Keccak256Hash(addr[:]),
-			Values:  values,
-		})
+		if len(values) > 0 {
+			diff.StorageDiff = append(diff.StorageDiff, ptypes.AccountStorageDiff{
+				Address: crypto.Keccak256Hash(addr[:]),
+				Values:  values,
+			})
+		}
 	}
 	return diff
 }

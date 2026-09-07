@@ -16,7 +16,6 @@ func BuildPipelineBlock(rawBlock *types.Block) ptypes.Block {
 		ID:                    rawBlock.Hash().Hex(),
 		Height:                rawBlock.Number(),
 		ParentID:              rawBlock.ParentHash().Hex(),
-		BaseFeePerGas:         big.NewInt(0),
 		Miner:                 strings.ToLower(rawBlock.Coinbase().Hex()),
 		GasLimit:              big.NewInt(int64(rawBlock.GasLimit())),
 		GasUsed:               big.NewInt(int64(rawBlock.GasUsed())),
@@ -66,14 +65,25 @@ func BuildPilelineBlockHeader(block *types.Block) *ptypes.Header {
 	return &blockHeader
 }
 
-func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, from common.Address, baseFee *big.Int) ptypes.Transaction {
-	to := receipt.ContractAddress
+func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, from common.Address) ptypes.Transaction {
+	to := common.Address{}
 	if tx.To() != nil {
 		to = *tx.To()
 	}
 	gasPrice := receipt.EffectiveGasPrice
 	if gasPrice == nil {
 		gasPrice = tx.GasPrice()
+	}
+	gasPrice = new(big.Int).Set(gasPrice)
+	// Receipts loaded by the RPC tracer expose the L1 fee separately. Live
+	// tracing already folds it into EffectiveGasPrice before reaching here.
+	if receipt.L1Fee != nil && receipt.GasUsed > 0 {
+		l1FeePerGas := new(big.Int).Div(new(big.Int).Set(receipt.L1Fee), new(big.Int).SetUint64(receipt.GasUsed))
+		gasPrice.Add(gasPrice, l1FeePerGas)
+	}
+	nonce := tx.Nonce()
+	if nonce == 0 && receipt.DepositNonce != nil {
+		nonce = *receipt.DepositNonce
 	}
 	transaction := ptypes.Transaction{
 		ID:               tx.Hash().Hex(),
@@ -86,7 +96,7 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 		GasFeeCap:        common.Big0,
 		GasTipCap:        common.Big0,
 		Input:            tx.Data(),
-		Nonce:            big.NewInt(int64(tx.Nonce())),
+		Nonce:            big.NewInt(int64(nonce)),
 		TransactionIndex: int64(receipt.TransactionIndex),
 		Value:            (*hexutil.Big)(tx.Value()),
 	}
@@ -94,6 +104,8 @@ func BuildPipelineTransaction(tx *types.Transaction, receipt *types.Receipt, fro
 	case types.DynamicFeeTxType, types.BlobTxType:
 		transaction.GasFeeCap = tx.GasFeeCap()
 		transaction.GasTipCap = tx.GasTipCap()
+	case types.LegacyTxType, types.AccessListTxType:
+		transaction.GasFeeCap = tx.GasPrice()
 	}
 	return transaction
 }

@@ -283,6 +283,14 @@ func (t *PipelineTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 	}
 }
 
+// CaptureEarlyExit records CALL/CREATE attempts that fail before the legacy
+// EVMLogger CaptureEnter hook is invoked.
+func (t *PipelineTracer) CaptureEarlyExit(depth int, typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int, gasUsed uint64, err error) {
+	if t.callTracer != nil {
+		t.callTracer.CaptureEarlyExit(depth, typ, from, to, input, gas, value, gasUsed, err)
+	}
+}
+
 func (t *PipelineTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	if t.callTracer != nil {
 		t.callTracer.CaptureState(pc, op, gas, cost, scope, rData, depth, err)
@@ -318,7 +326,7 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 
-	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
+	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From)
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }
 
@@ -562,7 +570,13 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	if originRoot != root {
 		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
 	} else {
-		BlockCtx.BlockDiff = nil
+		// Match op-reth's same-root fast path: keep the block and transactions,
+		// but omit execution output and publish an empty state diff carrying roots.
+		BlockCtx.BlockFile.Events = BlockCtx.BlockFile.Events[:0]
+		BlockCtx.BlockFile.Traces = BlockCtx.BlockFile.Traces[:0]
+		BlockCtx.BlockFile.ErrorEvents = BlockCtx.BlockFile.ErrorEvents[:0]
+		BlockCtx.BlockFile.ErrorTraces = BlockCtx.BlockFile.ErrorTraces[:0]
+		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, nil, nil, nil, nil, nil, nil)
 	}
 
 	for addr := range BlockCtx.ChangeContracts {
