@@ -238,7 +238,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange, nil)
 		if err == nil {
 			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
@@ -306,6 +306,13 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 	}
 }
 
+// genesisTxID 构造 genesis 合成 tx 的 id: 0x + 2位类型码 + 22个0 + 小写地址(去0x, 40字符), 总长66字符,
+// 与真实 tx hash 等长, 且为合法 hex, 可解析为 bytes32.
+// kind: 1=alloc balance transfer, 2=alloc code create, 3=native token create
+func genesisTxID(kind int, addrLower string) string {
+	return fmt.Sprintf("0x%02d%022d%s", kind, 0, strings.TrimPrefix(addrLower, "0x"))
+}
+
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
 	if NodeXPusher.LastBlockNotice != nil {
 		return
@@ -364,8 +371,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 		// 处理有 balance 的账户 - 构造转账 tx 和 call trace
 		if account.Balance != nil && account.Balance.Sign() > 0 {
-			// tx id: 0xgenesis01 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis01%013d%s", 0, addrLower)
+			// tx id: 0x + 01 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+			txID := genesisTxID(1, addrLower)
 
 			tx := ptypes.Transaction{
 				ID:               txID,
@@ -411,8 +418,8 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 
 		// 处理有 code 的账户 - 构造 create tx 和 create trace
 		if len(account.Code) > 0 {
-			// tx id: 0xgenesis02 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis02%013d%s", 0, addrLower)
+			// tx id: 0x + 02 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+			txID := genesisTxID(2, addrLower)
 
 			tx := ptypes.Transaction{
 				ID:               txID,
@@ -457,6 +464,50 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		}
 	}
 
+	// 添加原生代币合约创建 tx 和 trace (E地址)
+	nativeTokenAddr := "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	// tx id: 0x + 03 + 22个0 + 地址(去0x, 40字符) = 66字符, 可解析为 bytes32
+	nativeTokenTxID := genesisTxID(3, nativeTokenAddr)
+
+	nativeTokenTx := ptypes.Transaction{
+		ID:               nativeTokenTxID,
+		From:             zeroAddr,
+		To:               nativeTokenAddr,
+		Gas:              big.NewInt(0),
+		GasPrice:         big.NewInt(0),
+		GasUsed:          big.NewInt(0),
+		Status:           true,
+		GasFeeCap:        big.NewInt(0),
+		GasTipCap:        big.NewInt(0),
+		Input:            []byte{},
+		Nonce:            big.NewInt(0),
+		TransactionIndex: txIdx,
+		Value:            (*hexutil.Big)(big.NewInt(0)),
+	}
+	blockFile.Txs = append(blockFile.Txs, nativeTokenTx)
+
+	nativeTokenTraceID := util.ToHash([]string{nativeTokenTxID, "", "0"})
+	nativeTokenTrace := ptypes.Trace{
+		ID:                nativeTokenTraceID,
+		From:              zeroAddr,
+		Gas:               big.NewInt(0),
+		Input:             []byte{},
+		To:                nativeTokenAddr,
+		Value:             (*hexutil.Big)(big.NewInt(0)),
+		GasUsed:           big.NewInt(0),
+		Output:            []byte{},
+		CallCreateType:    "create",
+		CallType:          "",
+		TxID:              nativeTokenTxID,
+		ParentTraceID:     "",
+		PosInParentTrace:  0,
+		SelfStorageChange: false,
+		StorageChange:     false,
+		Subtraces:         0,
+		TraceAddress:      []int64{},
+	}
+	blockFile.Traces = append(blockFile.Traces, nativeTokenTrace)
+
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
 	if err != nil {
@@ -485,7 +536,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 		},
 	}
 
-	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
+	err = NodeXPusher.PushBlockChangeNotification(blockChanges, nil)
 	if err != nil {
 		log.Crit("Failed to push block change notification", "err", err)
 	}
