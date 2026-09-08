@@ -108,12 +108,13 @@ func TestPromotionWaitsForSuccessfulCallback(t *testing.T) {
 
 func TestGracePeriodMustCoverWatchFailureDetection(t *testing.T) {
 	_, err := NewLeaderFailover(Config{
-		Endpoints:   []string{"http://127.0.0.1:2379"},
-		Key:         "1/writers/leader",
-		NodeID:      "node-a",
-		GracePeriod: healthCheckInterval + healthCheckTimeout,
+		Endpoints:    []string{"http://127.0.0.1:2379"},
+		Key:          "1/writers/leader",
+		NodeID:       "node-a",
+		WriteLockTTL: 10,
+		GracePeriod:  defaultPollingInterval + pollingTimeout + 10*time.Second,
 	})
 	if err == nil {
-		t.Fatal("NewLeaderFailover accepted a grace period shorter than failure detection")
+		t.Fatal("NewLeaderFailover accepted a grace period shorter than required minimum")
 	}
 }

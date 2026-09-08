@@ -7,11 +7,12 @@ import (
 
 // Config is the configuration for etcd-based failover mode
 type Config struct {
-	Endpoints    []string
-	Key          string
-	NodeID       string
-	GracePeriod  time.Duration
-	WriteLockTTL int64 // TTL for writeLock key in seconds (default 10)
+	Endpoints       []string
+	Key             string
+	NodeID          string
+	GracePeriod     time.Duration
+	WriteLockTTL    int64         // TTL for writeLock key in seconds (default 10)
+	PollingInterval time.Duration // Polling interval for leader state check (default 5s)
 }
 
 // LeaderCallbacks defines callbacks for leader state changes
