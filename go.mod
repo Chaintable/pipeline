@@ -1,8 +1,6 @@
 module github.com/Chaintable/pipeline
 
-go 1.23.0
-
-toolchain go1.23.9
+go 1.23.9
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.5
