@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Chaintable/pipeline/leader"
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -56,44 +56,34 @@ func InitPipeline(region string, nodeXBucket string, chainTableBucket string, br
 	return nil
 }
 
-// SetupLeaderElection sets up manual leader election for the processors
-func SetupLeaderElection(etcdEndpoints []string, electionKey string, nodeID string, isBackup *bool, gracePeriod int, writeLockTTL int64) error {
-	config := leader.ManagerConfig{
-		EtcdEndpoints: etcdEndpoints,
-		ElectionKey:   electionKey,
-		NodeID:        nodeID,
-		IsBackup:      isBackup,
-		GracePeriod:   time.Duration(gracePeriod) * time.Second,
-		WriteLockTTL:  writeLockTTL,
-		OnBecomeLeader: func() error {
-			log.Info("Updating last block info on leader transition")
-			if NodeXPusher != nil {
-				if err := NodeXPusher.UpdateLastBlock(); err != nil {
-					log.Error("Failed to update NodeX last block", "err", err)
-					return fmt.Errorf("update NodeX Kafka checkpoint: %w", err)
-				}
+// SetupFailover 初始化写节点主备切换。主备逻辑全部收敛在 failover 包内，
+// 上层（含 go-ethereum）不感知角色变化：写入路径自己判断是否为主节点。
+func SetupFailover(cfg failover.Config) error {
+	cfg.OnBecomeLeader = func() error {
+		log.Info("Updating last block info on leader transition")
+		if NodeXPusher != nil {
+			if err := NodeXPusher.UpdateLastBlock(); err != nil {
+				log.Error("Failed to update NodeX last block", "err", err)
+				return fmt.Errorf("update NodeX Kafka checkpoint: %w", err)
 			}
-			return nil
-		},
-		OnLoseLeader: func() error {
-			return nil
-		},
+		}
+		return nil
 	}
+	cfg.OnLoseLeader = func() error { return nil }
 
-	manager, err := leader.NewManager(&config)
+	manager, err := failover.NewManager(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to create leader manager: %w", err)
+		return fmt.Errorf("failed to create failover manager: %w", err)
 	}
-	leader.GlobalManager = manager
+	failover.GlobalManager = manager
 
-	if err := leader.GlobalManager.Start(); err != nil {
+	if err := manager.Start(); err != nil {
 		_ = manager.Close()
-		leader.GlobalManager = nil
-		return fmt.Errorf("failed to start leader manager: %w", err)
+		failover.GlobalManager = nil
+		return fmt.Errorf("failed to start failover manager: %w", err)
 	}
 
-	log.Info("Leader election setup completed", "nodeID", nodeID, "electionKey", electionKey)
-
+	log.Info("Failover setup completed", "nodeID", cfg.NodeID, "leaderKey", cfg.LeaderKey)
 	return nil
 }
 

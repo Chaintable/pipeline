@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Chaintable/pipeline/leader"
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/types"
 	"github.com/Chaintable/pipeline/util"
@@ -177,7 +177,7 @@ func (p *PushProcessor) overwriteOnUpload(file *DataFile) bool {
 	if file.Kind == "block_file_validation" {
 		return false
 	}
-	return leader.GlobalManager != nil && leader.GlobalManager.IsLeader()
+	return failover.IsLeaderNode()
 }
 
 func (p *PushProcessor) uploadFileToS3(file *DataFile, overWrite bool) error {
@@ -279,15 +279,15 @@ func (p *PushProcessor) PushBlockChangeNotification(blockNotice *types.BlockChan
 	if blockNotice == nil || len(blockNotice.NewBlocks) == 0 {
 		return fmt.Errorf("block change notification has no new blocks")
 	}
-	if leader.GlobalManager == nil {
-		return fmt.Errorf("leader manager is not initialized")
+	if failover.GlobalManager == nil {
+		return fmt.Errorf("failover manager is not initialized")
 	}
-	leader.GlobalManager.Lock()
-	defer leader.GlobalManager.Unlock()
+	failover.GlobalManager.Mutex.Lock()
+	defer failover.GlobalManager.Mutex.Unlock()
 	p.noticeMu.Lock()
 	defer p.noticeMu.Unlock()
 
-	if !leader.GlobalManager.IsLeaderLocked() {
+	if !failover.GlobalManager.IsLeaderLocked() {
 		log.Printf("node is not the active leader, skip push block change notification\n")
 		return nil
 	}
@@ -377,17 +377,17 @@ func (p *PushProcessor) NotifyBlockCommit(block interface {
 	ParentHash() common.Hash
 	Time() uint64
 }, bc BlockChainReader, firstSeenAt map[common.Hash]int64) error {
-	if leader.GlobalManager == nil {
-		return fmt.Errorf("leader manager is not initialized")
+	if failover.GlobalManager == nil {
+		return fmt.Errorf("failover manager is not initialized")
 	}
 
-	leader.GlobalManager.Lock()
-	defer leader.GlobalManager.Unlock()
+	failover.GlobalManager.Mutex.Lock()
+	defer failover.GlobalManager.Mutex.Unlock()
 	p.noticeMu.Lock()
 	defer p.noticeMu.Unlock()
 
 	// 1. Check leader status first - backup nodes return immediately without any computation
-	if !leader.GlobalManager.IsLeaderLocked() {
+	if !failover.GlobalManager.IsLeaderLocked() {
 		log.Printf("backup node: skip block commit notification\n")
 		return nil
 	}
