@@ -12,7 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/Chaintable/pipeline/leader"
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -49,12 +49,16 @@ type pipelineTracerConfig struct {
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
-	ElectionKey   string   `json:"election_key"`
-	NodeID        string   `json:"node_id"`      // default to hostname
-	GracePeriod   int      `json:"grace_period"` // default to 10 seconds, unit is second
+	LeaderKey     string   `json:"leader_key"`     // default to <chain_id>/[<version>/]writers/leader
+	NodeID        string   `json:"node_id"`        // default to hostname
+	LockTTL       int64    `json:"lock_ttl"`       // writeLock 租约时长（秒），默认 20
+	CheckInterval int      `json:"check_interval"` // 指派 key 的轮询间隔（秒），默认 5
 
-	// Writer node registry configurations
-	WriterRegistryTTL int64 `json:"writer_registry_ttl"` // TTL for writer node registration in seconds, default 30
+	// Deprecated and ignored. Kept so older configs can be rolled forward.
+	GracePeriod       int    `json:"grace_period"`
+	WriteLockTTL      int64  `json:"write_lock_ttl"`
+	WriterRegistryTTL int64  `json:"writer_registry_ttl"`
+	ElectionKey       string `json:"election_key"`
 }
 
 func (config *pipelineTracerConfig) fillDefaultValues() {
@@ -77,12 +81,19 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 			config.NodeID = hostname
 		}
 	}
-	if config.GracePeriod == 0 {
-		config.GracePeriod = 10
+	// 兼容旧配置：write_lock_ttl 曾用于同一用途
+	if config.LockTTL <= 0 && config.WriteLockTTL > 0 {
+		config.LockTTL = config.WriteLockTTL
 	}
-	// Fill default values for writer registry
-	if config.WriterRegistryTTL == 0 {
-		config.WriterRegistryTTL = 10 // 10 seconds default TTL
+	if config.LockTTL <= 0 {
+		config.LockTTL = 20
+	}
+	if config.CheckInterval <= 0 {
+		config.CheckInterval = 5
+	}
+	// 兼容旧配置：election_key 与 leader_key 同义
+	if config.LeaderKey == "" && config.ElectionKey != "" {
+		config.LeaderKey = config.ElectionKey
 	}
 }
 
@@ -106,13 +117,9 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
 
-	// set default election key
-	if t.config.ElectionKey == "" {
-		if t.config.Version == "" {
-			t.config.ElectionKey = fmt.Sprintf("%s/writers/leader", chainConfig.ChainID.String())
-		} else {
-			t.config.ElectionKey = fmt.Sprintf("%s/%s/writers/leader", chainConfig.ChainID.String(), t.config.Version)
-		}
+	// set default leader key: <chain_id>/[<version>/]writers/leader
+	if t.config.LeaderKey == "" {
+		t.config.LeaderKey = failover.BuildLeaderKey(chainConfig.ChainID.String(), t.config.Version)
 	}
 
 	if t.config.Topic == "" {
@@ -132,26 +139,17 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
 
-	// Prepare writer registry configuration
-	var writerConfig *WriterRegistryConfig
-	// Writer registry is always enabled when etcd endpoints are configured
-	if len(t.config.EtcdEndpoints) > 0 {
-		writerConfig = &WriterRegistryConfig{
-			TTL:              t.config.WriterRegistryTTL,
-			NodeXBucket:      t.config.NodeXBucket,
-			ChainTableBucket: t.config.ChainTableBucket,
-			Region:           t.config.Region,
-			Brokers:          t.config.Brokers,
-			Topic:            t.config.Topic,
-		}
-	}
-
-	// Setup leader election based on configuration
-	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, writerConfig)
+	// Setup writer failover. 主备切换完全在 pipeline 内完成，geth 不感知。
+	err = SetupFailover(failover.Config{
+		EtcdEndpoints: t.config.EtcdEndpoints,
+		LeaderKey:     t.config.LeaderKey,
+		NodeID:        t.config.NodeID,
+		IsBackup:      t.config.IsBackup,
+		LockTTL:       t.config.LockTTL,
+		CheckInterval: time.Duration(t.config.CheckInterval) * time.Second,
+	})
 	if err != nil {
-		log.Crit("Failed to setup leader election", "err", err)
-		// Continue without election - will remain in backup mode
+		log.Crit("Failed to setup failover", "err", err)
 	}
 
 	// start upload work should be after leader election
@@ -171,20 +169,13 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 }
 
 func (t *PipelineTracer) OnClose() {
-	// Unregister writer node if registered
-	if WriterRegistry != nil {
-		if err := WriterRegistry.UnregisterNode(); err != nil {
-			log.Error("Failed to unregister writer node during shutdown", "err", err)
-		} else {
-			log.Info("Writer node unregistered during shutdown")
+	// Close the failover manager. 运维指派的 leader key 不删除，
+	// 它跨进程重启保持权威；只释放本节点持有的 writeLock。
+	if manager := failover.GlobalManager; manager != nil {
+		if err := manager.Close(); err != nil {
+			log.Error("Failed to close failover manager", "err", err)
 		}
-	}
-
-	// Close leader manager if it exists
-	if LeaderManager != nil {
-		LeaderManager.Close()
-		// Clear global reference
-		leader.GlobalManager = nil
+		failover.GlobalManager = nil
 	}
 	// Close processors
 	if NodeXPusher != nil {
@@ -314,7 +305,7 @@ func genesisTxID(kind int, addrLower string) string {
 }
 
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisAlloc) {
-	if NodeXPusher.LastBlockNotice != nil {
+	if NodeXPusher.LastPushedBlock() != nil {
 		return
 	}
 
