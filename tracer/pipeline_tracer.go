@@ -28,11 +28,17 @@ import (
 var _ vm.EVMLogger = (*PipelineTracer)(nil)
 
 type PipelineTracer struct {
-	config     pipelineTracerConfig
-	callTracer *callTracer
+	config      pipelineTracerConfig
+	callTracer  *callTracer
+	block       *ExtraInfo
+	collectOnly bool
+	sealed      bool
+	failed      bool
 }
 
 type pipelineTracerConfig struct {
+	PayloadCache PayloadCacheConfig `json:"payload_cache"`
+
 	Region               string   `json:"region"`
 	NodeXBucket          string   `json:"node_x_bucket"`
 	ChainTableBucket     string   `json:"chain_table_bucket"`
@@ -88,6 +94,9 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 		if err := json.Unmarshal(cfg, &config); err != nil {
 			return nil, fmt.Errorf("failed to parse config: %v", err)
 		}
+	}
+	if err := config.PayloadCache.normalize(); err != nil {
+		return nil, err
 	}
 	config.fillDefaultValues()
 
@@ -192,13 +201,16 @@ func (t *PipelineTracer) OnClose() {
 }
 
 func (t *PipelineTracer) OnBlockStart(block *types.Block) {
-	BlockCtx = &ExtraInfo{
+	t.callTracer = nil
+	t.failed = false
+	t.sealed = false
+	t.block = &ExtraInfo{
 		BlockNumber: block.Number().Uint64(),
 		BlockHash:   block.Hash(),
 	}
-	BlockCtx.BlockDiff = &ptypes.BlockStorageDiff{}
-	BlockCtx.BlockHeader = util.BuildPilelineBlockHeader(block)
-	BlockCtx.BlockFile = &ptypes.BlockFile{
+	t.block.BlockDiff = &ptypes.BlockStorageDiff{}
+	t.block.BlockHeader = util.BuildPilelineBlockHeader(block)
+	t.block.BlockFile = &ptypes.BlockFile{
 		Block:            util.BuildPipelineBlock(block),
 		Events:           make([]ptypes.Event, 0),
 		Txs:              make([]ptypes.Transaction, 0),
@@ -207,40 +219,52 @@ func (t *PipelineTracer) OnBlockStart(block *types.Block) {
 		ErrorTraces:      make([]ptypes.Trace, 0),
 		StorageContracts: make([]string, 0),
 	}
-	BlockCtx.Tx = nil
-	BlockCtx.From = common.Address{}
-	BlockCtx.BlockStartTime = time.Now()
-	BlockCtx.Committed = false
-	BlockCtx.ChangeContracts = make(map[common.Address]struct{})
+	t.block.Tx = nil
+	t.block.From = common.Address{}
+	t.block.BlockStartTime = time.Now()
+	t.block.Committed = false
+	t.block.ChangeContracts = make(map[common.Address]struct{})
 }
 
 func (t *PipelineTracer) OnBlockEnd(blockErr error) {
-	if BlockCtx == nil {
+	if t.collectOnly {
+		t.failed = t.failed || blockErr != nil
+		t.callTracer = nil
 		return
 	}
-	defer metrics.BlockProcessTimer.UpdateSince(BlockCtx.BlockStartTime)
+	if t.block == nil {
+		return
+	}
+	defer metrics.BlockProcessTimer.UpdateSince(t.block.BlockStartTime)
+	defer func() {
+		t.block = nil
+		t.callTracer = nil
+	}()
 
 	// A failed block must never produce pipeline artifacts. The next block start
-	// replaces BlockCtx, so only discard the in-flight transaction tracer here.
+	// replaces the block context; no artifact from a failed import is published.
 	if blockErr != nil {
 		t.callTracer = nil
-		log.Error("Skip failed block", "number", BlockCtx.BlockNumber, "hash", BlockCtx.BlockHash, "err", blockErr)
+		log.Error("Skip failed block", "number", t.block.BlockNumber, "hash", t.block.BlockHash, "err", blockErr)
 		return
 	}
 
 	// empty block process
-	if !BlockCtx.Committed {
-		t.OnCommit(BlockCtx.BlockHeader.StateRoot, BlockCtx.BlockHeader.StateRoot, nil, nil, nil, nil, nil, nil)
+	if !t.block.Committed {
+		t.OnCommit(t.block.BlockHeader.StateRoot, t.block.BlockHeader.StateRoot, nil, nil, nil, nil, nil, nil)
 	}
 
+	// Publish only after the caller has successfully written the block and state.
+	t.publishBlock()
+
 	// push block change notification
-	if BlockCtx.BlockChange != nil {
+	if t.block.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(t.block.BlockChange)
 		if err == nil {
-			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
+			log.Info("Push kafka", "dropBlocks", t.block.BlockChange.DropBlocks, "newBlocks", t.block.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
-			log.Error("Failed to push kafka", "err", err, "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks)
+			log.Error("Failed to push kafka", "err", err, "dropBlocks", t.block.BlockChange.DropBlocks, "newBlocks", t.block.BlockChange.NewBlocks)
 		}
 	}
 }
@@ -306,17 +330,28 @@ func (t *PipelineTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64,
 // Custom methods
 
 func (t *PipelineTracer) OnTxStart(tx *types.Transaction, from common.Address) {
-	callTracer := newCallTracerRaw(BlockCtx.ChangeContracts, BlockCtx.BlockFile)
+	if t.block == nil || t.sealed {
+		t.failed = true
+		return
+	}
+	callTracer := newCallTracerRaw(t.block.ChangeContracts, t.block.BlockFile)
 	t.callTracer = callTracer
 	t.callTracer.OnTxStart(tx, from)
-	BlockCtx.Tx = tx
-	BlockCtx.From = from
-	BlockCtx.TxStartTime = time.Now()
+	t.block.Tx = tx
+	t.block.From = from
+	t.block.TxStartTime = time.Now()
 }
 
 func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
+	if t.block == nil || t.sealed {
+		t.failed = true
+		return
+	}
+	if err != nil || receipt == nil {
+		t.failed = true
+	}
 	defer func() {
-		metrics.BlockTxExecutionTimer.UpdateSince(BlockCtx.TxStartTime)
+		metrics.BlockTxExecutionTimer.UpdateSince(t.block.TxStartTime)
 	}()
 	if t.callTracer != nil {
 		t.callTracer.OnTxEnd(receipt, err)
@@ -326,11 +361,15 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 
-	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From)
-	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
+	tx := util.BuildPipelineTransaction(t.block.Tx, receipt, t.block.From)
+	t.block.BlockFile.Txs = append(t.block.BlockFile.Txs, tx)
 }
 
 func (t *PipelineTracer) OnLog(log *types.Log) {
+	if t.sealed {
+		t.failed = true
+		return
+	}
 	if t.callTracer != nil {
 		t.callTracer.OnLog(log)
 	}
@@ -567,22 +606,31 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc types.GenesisA
 }
 
 func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, accountsOrigin map[common.Address][]byte, storages map[common.Hash]map[common.Hash][]byte, storagesOrigin map[common.Address]map[common.Hash][]byte, codes map[common.Hash][]byte) {
+	if t.collectOnly {
+		// A build must never commit state or publish an artifact.
+		t.failed = true
+		return
+	}
 	if originRoot != root {
-		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
+		t.block.BlockDiff = stateUpdateToStateDiff(originRoot, root, destructs, accounts, accountsOrigin, storages, storagesOrigin, codes)
 	} else {
 		// Match op-reth's same-root fast path: keep the block and transactions,
 		// but omit execution output and publish an empty state diff carrying roots.
-		BlockCtx.BlockFile.Events = BlockCtx.BlockFile.Events[:0]
-		BlockCtx.BlockFile.Traces = BlockCtx.BlockFile.Traces[:0]
-		BlockCtx.BlockFile.ErrorEvents = BlockCtx.BlockFile.ErrorEvents[:0]
-		BlockCtx.BlockFile.ErrorTraces = BlockCtx.BlockFile.ErrorTraces[:0]
-		BlockCtx.BlockDiff = stateUpdateToStateDiff(originRoot, root, nil, nil, nil, nil, nil, nil)
+		t.block.BlockFile.Events = t.block.BlockFile.Events[:0]
+		t.block.BlockFile.Traces = t.block.BlockFile.Traces[:0]
+		t.block.BlockFile.ErrorEvents = t.block.BlockFile.ErrorEvents[:0]
+		t.block.BlockFile.ErrorTraces = t.block.BlockFile.ErrorTraces[:0]
+		t.block.BlockDiff = stateUpdateToStateDiff(originRoot, root, nil, nil, nil, nil, nil, nil)
 	}
 
-	for addr := range BlockCtx.ChangeContracts {
-		BlockCtx.BlockFile.StorageContracts = append(BlockCtx.BlockFile.StorageContracts, strings.ToLower(addr.Hex()))
+	for addr := range t.block.ChangeContracts {
+		t.block.BlockFile.StorageContracts = append(t.block.BlockFile.StorageContracts, strings.ToLower(addr.Hex()))
 	}
 
+	t.block.Committed = true
+}
+
+func (t *PipelineTracer) publishBlock() {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var uploadErrs []error
@@ -600,7 +648,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := uploadBlockHeader(BlockCtx.BlockHeader)
+		err := uploadBlockHeader(t.block.BlockHeader)
 		if err != nil {
 			handleError(err)
 			return
@@ -611,10 +659,10 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if BlockCtx.BlockDiff == nil {
+		if t.block.BlockDiff == nil {
 			return
 		}
-		err := uploadBlockDiff(BlockCtx.BlockDiff)
+		err := uploadBlockDiff(t.block.BlockDiff)
 		if err != nil {
 			handleError(err)
 			return
@@ -625,7 +673,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := uploadBlockFile(BlockCtx.BlockFile)
+		err := uploadBlockFile(t.block.BlockFile)
 		if err != nil {
 			handleError(err)
 			return
@@ -636,7 +684,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := uploadblockFileValidation(BlockCtx.BlockFile)
+		err := uploadblockFileValidation(t.block.BlockFile)
 		if err != nil {
 			handleError(err)
 			return
@@ -646,7 +694,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	// 等待所有上传完成
 	wg.Wait()
 
-	log.Info("Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
+	log.Info("Upload block", "block number", t.block.BlockNumber, "block hash", t.block.BlockHash.Hex())
 
 	// 检查是否有错误
 	if len(uploadErrs) > 0 {
@@ -656,9 +704,7 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 		log.Crit("One or more uploads failed")
 	}
 
-	BlockCtx.Committed = true
-
-	metrics.LatestUploadedBlockNumber.Update(int64(BlockCtx.BlockNumber))
+	metrics.LatestUploadedBlockNumber.Update(int64(t.block.BlockNumber))
 }
 
 func addressToHash(a common.Address) common.Hash {

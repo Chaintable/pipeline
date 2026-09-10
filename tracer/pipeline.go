@@ -37,7 +37,6 @@ type ExtraInfo struct {
 var (
 	NodeXPusher            *processor.PushProcessor
 	ChainTableBucketPusher *processor.PushProcessor
-	BlockCtx               *ExtraInfo
 	BizChainID             string
 	Version                string
 	LeaderManager          *leader.Manager
@@ -201,7 +200,7 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	for hash, code := range codes {
 		stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
 			CodeHash: hash,
-			Code:     code,
+			Code:     common.CopyBytes(code),
 		})
 	}
 	if originRoot == (common.Hash{}) {
