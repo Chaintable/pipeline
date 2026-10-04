@@ -131,10 +131,16 @@ func (p *PushProcessor) uploadWork() error {
 				return
 			case dataFile := <-p.S3DataCh:
 				go func() {
-					err = p.UploadFileToS3(dataFile)
+					err := p.UploadFileToS3(dataFile)
 					if err != nil {
 						log.Printf("failed to upload files to s3: %v", err)
 						panic(err)
+					}
+					// Keep pending files when shutdown interrupts an upload retry.
+					select {
+					case <-p.quitCh:
+						return
+					default:
 					}
 					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"))
 					err = os.Remove(localfilePath)
