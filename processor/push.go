@@ -118,6 +118,11 @@ func (p *PushProcessor) uploadWork() error {
 		if err != nil {
 			return err
 		}
+		select {
+		case <-p.quitCh:
+			return nil
+		default:
+		}
 		// remove tmp file
 		err = os.Remove(fullPath)
 		if err != nil {
@@ -131,10 +136,16 @@ func (p *PushProcessor) uploadWork() error {
 				return
 			case dataFile := <-p.S3DataCh:
 				go func() {
-					err = p.UploadFileToS3(dataFile)
+					err := p.UploadFileToS3(dataFile)
 					if err != nil {
 						log.Printf("failed to upload files to s3: %v", err)
 						panic(err)
+					}
+					// Retain the pending file when shutdown interrupts a retry.
+					select {
+					case <-p.quitCh:
+						return
+					default:
 					}
 					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"))
 					err = os.Remove(localfilePath)
@@ -184,27 +195,18 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 			metrics.StateDiffUploadTimer.UpdateSince(start)
 		}
 	}()
-	times := 0
 	for {
 		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
-		if err != nil {
-			var apiErr smithy.APIError
-			if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
-				strings.Contains(err.Error(), "InternalServerError") {
-				log.Printf("HTTP 500 error detected, retrying in 1 second: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
-			if times > 3 {
-				return err
-			}
-			time.Sleep(time.Second)
-			times++
-			continue
+		if err == nil {
+			return nil
 		}
-		break
+		log.Printf("S3 upload failed for %s, retrying in 1 second: %v", file.S3key, err)
+		select {
+		case <-p.quitCh:
+			return nil
+		case <-time.After(time.Second):
+		}
 	}
-	return nil
 }
 
 func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
