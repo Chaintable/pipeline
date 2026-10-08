@@ -26,4 +26,7 @@ var (
 	BlockFileValidationTimer = metrics.GetOrRegisterTimer("pipeline/block_file_validation", nil)
 
 	BlockPushTimer = metrics.GetOrRegisterTimer("pipeline/block_push", nil)
+
+	// S3UploadRetryCounter counts failed S3 upload attempts before retrying.
+	S3UploadRetryCounter = metrics.NewRegisteredCounter("pipeline/s3_upload_retry", nil)
 )
