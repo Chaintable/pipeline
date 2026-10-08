@@ -56,7 +56,7 @@ func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
 		Balancer:     &kafka.Hash{},
-		RequiredAcks: kafka.RequireOne,
+		RequiredAcks: kafka.RequireAll,
 		BatchBytes:   1024 * 1024 * 10, // 10MB
 		// 默认100个，或者等待1s才发生
 		BatchSize: 1,

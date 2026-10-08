@@ -111,12 +111,18 @@ func (p *PushProcessor) uploadWork() error {
 
 		// replace - to /
 		s3Key := strings.ReplaceAll(file.Name(), "-", "/")
-		err = p.UploadFileToS3(&DataFile{
+		// Replay must not overwrite objects already updated by the consistency checker.
+		err = p.uploadFileToS3(&DataFile{
 			S3key: s3Key,
 			Data:  data,
-		})
+		}, false)
 		if err != nil {
 			return err
+		}
+		select {
+		case <-p.quitCh:
+			return nil
+		default:
 		}
 		// remove tmp file
 		err = os.Remove(fullPath)
@@ -131,10 +137,16 @@ func (p *PushProcessor) uploadWork() error {
 				return
 			case dataFile := <-p.S3DataCh:
 				go func() {
-					err = p.UploadFileToS3(dataFile)
+					err := p.UploadFileToS3(dataFile)
 					if err != nil {
 						log.Printf("failed to upload files to s3: %v", err)
 						panic(err)
+					}
+					// Retain the pending file when shutdown interrupts a retry.
+					select {
+					case <-p.quitCh:
+						return
+					default:
 					}
 					localfilePath := filepath.Join(p.S3TempDir, strings.ReplaceAll(dataFile.S3key, "/", "-"))
 					err = os.Remove(localfilePath)
@@ -164,6 +176,19 @@ func (p *PushProcessor) UploadFile(dataFile *DataFile) error {
 }
 
 func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
+	return p.uploadFileToS3(file, p.overwriteOnUpload(file))
+}
+
+// Validation objects may have fork flags updated by the consistency checker.
+// Never overwrite them with the writer's initial is_fork=false value.
+func (p *PushProcessor) overwriteOnUpload(file *DataFile) bool {
+	if file.Kind == "block_file_validation" {
+		return false
+	}
+	return leader.GlobalManager.IsLeader()
+}
+
+func (p *PushProcessor) uploadFileToS3(file *DataFile, overWrite bool) error {
 	start := time.Now()
 	var err error
 	defer func() {
@@ -184,27 +209,19 @@ func (p *PushProcessor) UploadFileToS3(file *DataFile) error {
 			metrics.StateDiffUploadTimer.UpdateSince(start)
 		}
 	}()
-	times := 0
 	for {
-		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
-		if err != nil {
-			var apiErr smithy.APIError
-			if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
-				strings.Contains(err.Error(), "InternalServerError") {
-				log.Printf("HTTP 500 error detected, retrying in 1 second: %v", err)
-				time.Sleep(time.Second)
-				continue
-			}
-			if times > 3 {
-				return err
-			}
-			time.Sleep(time.Second)
-			times++
-			continue
+		err = util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, overWrite)
+		if err == nil {
+			return nil
 		}
-		break
+		log.Printf("S3 upload failed for %s, retrying in 1 second: %v", file.S3key, err)
+		metrics.S3UploadRetryCounter.Inc(1)
+		select {
+		case <-p.quitCh:
+			return nil
+		case <-time.After(time.Second):
+		}
 	}
-	return nil
 }
 
 func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
@@ -216,7 +233,7 @@ func (p *PushProcessor) UploadFilesToS3(files []*DataFile) error {
 		go func(file *DataFile) {
 			times := 0
 			for {
-				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, leader.GlobalManager.IsLeader())
+				err := util.UploadFileToS3(p.Uploader, p.Bucket, file.S3key, file.Data, p.overwriteOnUpload(file))
 				if err != nil {
 					var apiErr smithy.APIError
 					if (errors.As(err, &apiErr) && apiErr.ErrorCode() == "InternalServerException") || strings.Contains(err.Error(), "StatusCode: 500") ||
