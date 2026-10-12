@@ -1,6 +1,7 @@
 package tracer
 
 import (
+	"fmt"
 	"strings"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -57,7 +58,20 @@ func (t *RPCTracer) GetCallTracer() vm.EVMLogger {
 	return t.callTracer
 }
 
-func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) error {
+	if err != nil {
+		return err
+	}
+	if receipt == nil {
+		return fmt.Errorf("missing transaction receipt")
+	}
+	if t.callTracer == nil || len(t.callTracer.callstack) != 1 {
+		return fmt.Errorf("missing or unbalanced transaction call trace")
+	}
+	// A matching state root alone cannot detect an omitted failed root call.
+	if len(receipt.PostState) == 0 && t.callTracer.callstack[0].failed() != (receipt.Status == types.ReceiptStatusFailed) {
+		return fmt.Errorf("root call trace status does not match receipt")
+	}
 	t.callTracer.OnTxEnd(receipt, err)
 
 	baseFee := t.currentBlock.BlockHeader.BaseFeePerGas.ToInt()
@@ -65,6 +79,7 @@ func (t *RPCTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.currentBlock.BlockFile.Txs = append(t.currentBlock.BlockFile.Txs, tx)
 
 	t.callTracer = nil
+	return nil
 }
 
 func (t *RPCTracer) OnLog(log *types.Log) {
