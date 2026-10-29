@@ -11,7 +11,6 @@ import (
 	"github.com/Chaintable/pipeline/writer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/holiman/uint256"
@@ -143,12 +142,15 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 		stateDiff.DeletedAccounts = append(stateDiff.DeletedAccounts, addrhash)
 	}
 	for k, v := range accounts {
-		account, _ := types.FullAccount(v)
+		account, err := ptypes.DecodeApeSlimAccount(v)
+		if err != nil {
+			log.Crit("Failed to decode ApeChain account", "account", k, "err", err)
+		}
 		stateDiff.NewAccounts = append(stateDiff.NewAccounts, ptypes.NewAccount{
 			Address:  k,
-			Balance:  account.Balance,
-			Nonce:    uint64(account.Nonce),
-			CodeHash: common.BytesToHash(account.CodeHash),
+			Balance:  new(uint256.Int), // ApeChain: the balance lives in the yield slots
+			Nonce:    account.Nonce,
+			CodeHash: account.CodeHashOrEmpty(),
 		})
 	}
 	for account, storage := range storages {
@@ -172,6 +174,15 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 			Values:  Values,
 		})
 	}
+	// A nil accountsOrigin, as on the debank_block RPC path, writes every slot
+	// of each changed account.
+	yieldChanges, err := ptypes.ApeYieldChangesFromCommit(destructs, accounts, accountsOrigin)
+	if err != nil {
+		log.Crit("Failed to build ApeChain yield diff", "err", err)
+	}
+	if yieldDiff := ptypes.ApeYieldStorageDiff(yieldChanges); yieldDiff != nil {
+		stateDiff.StorageDiff = append(stateDiff.StorageDiff, *yieldDiff)
+	}
 	for hash, code := range codes {
 		stateDiff.NewCodes = append(stateDiff.NewCodes, ptypes.NewCode{
 			CodeHash: hash,
@@ -189,42 +200,11 @@ func stateUpdateToStateDiff(originRoot common.Hash, root common.Hash, destructs 
 	return stateDiff
 }
 
+// GenesisAllocToStateDiff is not usable on ApeChain: a genesis alloc holds
+// materialized balances, not the yield fields. Export the committed genesis
+// trie instead (go-ethereum state.Alloc.ToStorageDiff).
 func GenesisAllocToStateDiff(genesisAlloc types.GenesisAlloc) *ptypes.BlockStorageDiff {
-	diff := &ptypes.BlockStorageDiff{}
-	diff.NewAccounts = make([]ptypes.NewAccount, 0)
-	diff.NewCodes = make([]ptypes.NewCode, 0)
-	diff.StorageDiff = make([]ptypes.AccountStorageDiff, 0)
-	diff.DeletedAccounts = make([]common.Hash, 0)
-	for addr, acc := range genesisAlloc {
-		diff.NewAccounts = append(diff.NewAccounts, ptypes.NewAccount{
-			Address:  crypto.Keccak256Hash(addr[:]),
-			Balance:  uint256.MustFromBig(acc.Balance),
-			Nonce:    acc.Nonce,
-			CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
-		})
-		if len(acc.Code) > 0 {
-			diff.NewCodes = append(diff.NewCodes, ptypes.NewCode{
-				CodeHash: crypto.HashData(crypto.NewKeccakState(), acc.Code),
-				Code:     acc.Code,
-			})
-		}
-		values := make([]ptypes.IndexValuePair, 0)
-		for index, v := range acc.Storage {
-			value := uint256.NewInt(0)
-			if len(v) > 0 {
-				value = uint256.NewInt(0).SetBytes(v.Bytes())
-			}
-			values = append(values, ptypes.IndexValuePair{
-				Index: crypto.Keccak256Hash(index[:]),
-				Value: value,
-			})
-		}
-		diff.StorageDiff = append(diff.StorageDiff, ptypes.AccountStorageDiff{
-			Address: crypto.Keccak256Hash(addr[:]),
-			Values:  values,
-		})
-	}
-	return diff
+	panic("ApeChain genesis state diff must come from the committed genesis trie")
 }
 
 func uploadBlockHeader(blockHeader *ptypes.Header) error {
