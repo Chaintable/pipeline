@@ -417,7 +417,11 @@ func (p *PushProcessor) NotifyBlockCommit(block interface {
 	var blockChange *types.BlockChangeNotification
 
 	if lastPushedBlock != nil && lastPushedBlock.BlockNumber <= block.NumberU64() {
-		_, dropBlocks, newBlocks := p.getCommonAncestor(bc, *lastPushedBlock, currentBlock)
+		_, dropBlocks, newBlocks, err := p.getCommonAncestor(bc, *lastPushedBlock, currentBlock)
+		if err != nil {
+			// header 缺失时不退出进程，下一个块提交时会重新计算。
+			return fmt.Errorf("compute common ancestor: %w", err)
+		}
 
 		if len(dropBlocks) > 0 {
 			// Fork/reorg case
@@ -518,14 +522,14 @@ func (p *PushProcessor) pushBlockChangeNotificationLocked(blockNotice *types.Blo
 	return nil
 }
 
-func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.BlockContext, blockb types.BlockContext) (types.BlockContext, []types.BlockContext, []types.BlockContext) {
+func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.BlockContext, blockb types.BlockContext) (types.BlockContext, []types.BlockContext, []types.BlockContext, error) {
 	var (
 		chainA, chainB []types.BlockContext
 	)
 
 	// Fast path: blockb is direct child of blocka
 	if blockb.ParentHash == blocka.Hash {
-		return blocka, chainA, []types.BlockContext{blockb}
+		return blocka, chainA, []types.BlockContext{blockb}, nil
 	}
 
 	// Bring blockb down to same height as blocka
@@ -533,7 +537,7 @@ func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.Bloc
 		chainB = append(chainB, blockb)
 		headerb := bc.GetHeaderByHash2(blockb.ParentHash)
 		if headerb == nil {
-			log.Fatalf("Failed to get header by hash: %s", blockb.ParentHash)
+			return types.BlockContext{}, nil, nil, fmt.Errorf("header not found: %s", blockb.ParentHash)
 		}
 		blockb = types.BlockContext{
 			BlockNumber: headerb.Number.Uint64(),
@@ -543,12 +547,19 @@ func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.Bloc
 		}
 	}
 
+	// 祖先不可能低于创世块；超过这个深度一定是数据异常，
+	// 继续走会在创世块的空 parent 上死循环。
+	const maxWalk = 100000
+
 	// Walk both chains back until we find common ancestor
 	for blocka.Hash != blockb.Hash {
+		if len(chainA) > maxWalk {
+			return types.BlockContext{}, nil, nil, fmt.Errorf("common ancestor deeper than %d blocks", maxWalk)
+		}
 		chainA = append(chainA, blocka)
 		headera := bc.GetHeaderByHash2(blocka.ParentHash)
 		if headera == nil {
-			log.Fatalf("Failed to get header by hash: %s", blocka.ParentHash)
+			return types.BlockContext{}, nil, nil, fmt.Errorf("header not found: %s", blocka.ParentHash)
 		}
 		blocka = types.BlockContext{
 			BlockNumber: headera.Number.Uint64(),
@@ -560,7 +571,7 @@ func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.Bloc
 		chainB = append(chainB, blockb)
 		headerb := bc.GetHeaderByHash2(blockb.ParentHash)
 		if headerb == nil {
-			log.Fatalf("Failed to get header by hash: %s", blockb.ParentHash)
+			return types.BlockContext{}, nil, nil, fmt.Errorf("header not found: %s", blockb.ParentHash)
 		}
 		blockb = types.BlockContext{
 			BlockNumber: headerb.Number.Uint64(),
@@ -579,7 +590,7 @@ func (p *PushProcessor) getCommonAncestor(bc BlockChainReader, blocka types.Bloc
 		chainB[i], chainB[j] = chainB[j], chainB[i]
 	}
 
-	return blocka, chainA, chainB
+	return blocka, chainA, chainB, nil
 }
 
 func (p *PushProcessor) Close() {

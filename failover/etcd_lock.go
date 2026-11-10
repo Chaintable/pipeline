@@ -2,10 +2,14 @@ package failover
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -21,207 +25,179 @@ import (
 // 互斥性来自 leaderKey 上的事务：CreateRevision == 0 才能写入，因此同一时刻只有
 // 一个节点能持有 writeLock。旧主节点宕机后 lease 到期，key 被删除，新主节点才能拿到锁，
 // 这个空窗期天然替代了原实现里的 gracePeriod。
+//
+// 光有 etcd 侧的互斥还不够：旧主与 etcd 断连时，它自己并不知道租约已在服务端过期。
+// 因此本地记录「最近一次成功续约的发起时间 + TTL」作为到期时刻的保守估计（服务端续约
+// 发生在请求发出之后，真实到期只会更晚），写入路径通过 Valid() 在到期前 safetyMargin
+// 就停止写入。这样即使续约请求卡住、降级回调还没执行，也不会与新主节点双写。
 type EtcdLock struct {
-	parent     context.Context
 	leaderKey  string
 	versionKey string
 	nodeID     string
 	client     *clientv3.Client
 	ttl        int64
-	lease      clientv3.LeaseID
-	ctx        context.Context
-	cancel     context.CancelFunc
-	onLost     func()      // 锁丢失时的回调函数
-	lost       atomic.Bool // 续约失败达到上限后置位
+	onLost     func() // 续约失败时的回调
+
+	lease clientv3.LeaseID // Acquire 成功后不再变化
+
+	// base 提供单调时钟基准；expireAt 是相对 base 的到期偏移，避免墙上时钟跳变。
+	base     time.Time
+	expireAt atomic.Int64
+	lost     atomic.Bool
+
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
-// NewLock 创建锁。parent 用于在进程关闭时中断阻塞中的 Acquire。
-func NewLock(parent context.Context, leaderKey, versionKey, nodeID string, client *clientv3.Client, ttl int64, onLost func()) *EtcdLock {
-	if parent == nil {
-		parent = context.Background()
-	}
+// NewLock 创建锁。
+func NewLock(leaderKey, versionKey, nodeID string, client *clientv3.Client, ttl int64, onLost func()) *EtcdLock {
 	return &EtcdLock{
-		parent:     parent,
 		leaderKey:  leaderKey,
 		versionKey: versionKey,
 		nodeID:     nodeID,
 		client:     client,
 		ttl:        ttl,
 		onLost:     onLost,
+		base:       time.Now(),
+		stop:       make(chan struct{}),
 	}
 }
 
-// Acquire 尝试获取 writeLock。返回 false 表示本轮没拿到，调用方会在下一个检查周期重试。
-//
-// 注意：本函数可能阻塞在 watch 上等待旧锁释放，调用方必须在不持有 Manager 互斥锁的
-// 情况下调用它，否则会阻塞区块提交路径。
+// Acquire 尝试获取 writeLock，不阻塞等待旧锁释放。返回 false 表示本轮没拿到，
+// 调用方会在下一个检查周期重试。
 func (l *EtcdLock) Acquire() bool {
-	// 创建 context 用于取消操作。派生自 parent，进程关闭时可中断等待。
-	l.ctx, l.cancel = context.WithCancel(l.parent)
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
 
-	// 创建租约
-	leaseResp, err := l.client.Grant(context.Background(), l.ttl)
+	start := time.Now()
+	leaseResp, err := l.client.Grant(ctx, l.ttl)
 	if err != nil {
 		log.Printf("[Failover] Failed to create lease: %v", err)
 		return false
 	}
-	log.Printf("[Failover] Lease created with ID: %d for lock key: %s", leaseResp.ID, l.leaderKey)
 	l.lease = leaseResp.ID
+	l.renewed(start, leaseResp.TTL)
 
-	// 尝试获取锁
-	for {
-		// 使用事务来原子性地检查并设置锁
-		// 条件: leaderKey 不存在 AND versionKey 的值等于 nodeID
-		txn := l.client.Txn(context.Background())
-		txn = txn.If(
-			clientv3.Compare(clientv3.CreateRevision(l.leaderKey), "=", 0),
-			clientv3.Compare(clientv3.Value(l.versionKey), "=", l.nodeID),
-		).
-			Then(clientv3.OpPut(l.leaderKey, l.nodeID, clientv3.WithLease(l.lease))).
-			Else(clientv3.OpGet(l.leaderKey), clientv3.OpGet(l.versionKey))
-
-		txnResp, err := txn.Commit()
-		if err != nil {
-			log.Printf("[Failover] Failed to commit transaction: %v", err)
-			l.Release()
-			return false
-		}
-
-		// 如果 If 条件为真，说明获取锁成功
-		if txnResp.Succeeded {
-			log.Printf("[Failover] Lock acquired successfully for key: %s", l.leaderKey)
-			// 启动 WatchDog 续约
-			go l.WatchDog()
-			return true
-		}
-
-		// 获取锁失败，检查失败原因
-		leaderResp := txnResp.Responses[0].GetResponseRange()
-		versionResp := txnResp.Responses[1].GetResponseRange()
-
-		// 检查主节点指派是否仍指向自己
-		if len(versionResp.Kvs) > 0 {
-			currentLeader := string(versionResp.Kvs[0].Value)
-			if currentLeader != l.nodeID {
-				log.Printf("[Failover] Leader mismatch: expected %s, got %s. Cannot acquire lock for key: %s",
-					l.nodeID, currentLeader, l.leaderKey)
-				l.Release()
-				return false
-			}
-		} else {
-			log.Printf("[Failover] Leader key %s does not exist. Cannot acquire lock for key: %s",
-				l.versionKey, l.leaderKey)
-			l.Release()
-			return false
-		}
-
-		// 指派匹配但锁被占用，等待当前持有者释放锁
-		log.Printf("[Failover] Lock is held by another process, waiting for release: %s", l.leaderKey)
-
-		// 获取当前 key 的 revision，用于 watch
-		if len(leaderResp.Kvs) == 0 {
-			// key 已被删除，重试获取锁
-			continue
-		}
-
-		// Watch key 的删除事件
-		watchChan := l.client.Watch(l.ctx, l.leaderKey, clientv3.WithRev(leaderResp.Kvs[0].ModRevision))
-
-		// 等待锁被释放
-		select {
-		case watchResp := <-watchChan:
-			if watchResp.Err() != nil {
-				log.Printf("[Failover] Watch error: %v, retrying lock acquisition", watchResp.Err())
-				time.Sleep(time.Second)
-				// watch 出错时重试获取锁，而不是放弃
-				continue
-			}
-
-			// 检查是否有删除事件
-			for _, event := range watchResp.Events {
-				if event.Type == clientv3.EventTypeDelete {
-					log.Printf("[Failover] Lock released, retrying acquisition: %s", l.leaderKey)
-					break
-				}
-			}
-			// 重试获取锁
-			continue
-
-		case <-l.ctx.Done():
-			log.Printf("[Failover] Lock acquisition cancelled: %s", l.leaderKey)
-			l.Release()
-			return false
-		}
+	// 条件: leaderKey 不存在 AND versionKey 的值等于 nodeID
+	txnResp, err := l.client.Txn(ctx).If(
+		clientv3.Compare(clientv3.CreateRevision(l.leaderKey), "=", 0),
+		clientv3.Compare(clientv3.Value(l.versionKey), "=", l.nodeID),
+	).
+		Then(clientv3.OpPut(l.leaderKey, l.nodeID, clientv3.WithLease(l.lease))).
+		Else(clientv3.OpGet(l.leaderKey), clientv3.OpGet(l.versionKey)).
+		Commit()
+	if err != nil {
+		// 超时时事务可能已在服务端提交，Release 撤销租约会把 key 一并删掉。
+		log.Printf("[Failover] Failed to commit transaction: %v", err)
+		l.Release()
+		return false
 	}
+
+	if !txnResp.Succeeded {
+		holder, assigned := "<none>", "<none>"
+		if kvs := txnResp.Responses[0].GetResponseRange().Kvs; len(kvs) > 0 {
+			holder = string(kvs[0].Value)
+		}
+		if kvs := txnResp.Responses[1].GetResponseRange().Kvs; len(kvs) > 0 {
+			assigned = string(kvs[0].Value)
+		}
+		log.Printf("[Failover] Cannot acquire %s: assigned=%s holder=%s, self=%s",
+			l.leaderKey, assigned, holder, l.nodeID)
+		l.Release()
+		return false
+	}
+
+	log.Printf("[Failover] Lock acquired for key: %s, lease: %d", l.leaderKey, l.lease)
+	go l.keepAlive()
+	return true
 }
 
-// Release 撤销租约并停止续约，writeLock key 随 lease 撤销自动删除。
-//
-// 这里给 Revoke 加了超时：Release 由持有 Manager 写锁的路径调用，不能被一次
-// 卡住的 etcd 请求拖住区块提交。
-func (l *EtcdLock) Release() {
-	if l.lease != 0 {
-		lease := l.lease
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_, err := l.client.Revoke(ctx, lease)
-		cancel()
-		l.lease = 0
-		if err != nil {
-			// 撤销失败也要继续：lease 会在 TTL 到期后自动过期，key 随之删除。
-			log.Printf("[Failover] Failed to revoke lease %d for key %s: %v", lease, l.leaderKey, err)
-		} else {
-			log.Printf("[Failover] Lock released for key: %s, lease: %d", l.leaderKey, lease)
-		}
-	}
-
-	if l.cancel != nil {
-		l.cancel()
-		l.cancel = nil
-	}
+// renewed 记录一次成功续约：start 是请求发起时刻，ttl 是服务端返回的剩余秒数。
+func (l *EtcdLock) renewed(start time.Time, ttl int64) {
+	l.expireAt.Store(int64(start.Sub(l.base) + time.Duration(ttl)*time.Second))
 }
 
-func (l *EtcdLock) WatchDog() {
-	interval := time.Duration(l.ttl/4) * time.Second
-	if interval <= 0 {
-		interval = time.Second
+// Valid 返回本地估计下租约是否仍然有效。写入路径在持有 Manager.Mutex 时调用，
+// 只读原子变量，不做网络调用。
+func (l *EtcdLock) Valid() bool {
+	if l.lost.Load() {
+		return false
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	failCount := 0
-	maxFail := 3 // 允许连续失败 3 次，容忍单节点故障
-
-	log.Printf("[Failover] WatchDog started for key %s (interval: %v, maxFail: %d)", l.leaderKey, interval, maxFail)
-
-	for {
-		select {
-		case <-ticker.C:
-			_, err := l.client.KeepAliveOnce(context.Background(), l.lease)
-			if err != nil {
-				failCount++
-				log.Printf("[Failover] Failed to refresh lease (attempt %d/%d): %v", failCount, maxFail, err)
-				if failCount >= maxFail {
-					log.Printf("[Failover] Max retry reached, lock lost for key: %s", l.leaderKey)
-					l.lease = 0 // 标记 lease 已失效
-					// 先置位再回调：晋升流程可能还没把本锁挂到 Manager 上，
-					// 它会在挂载前检查这个标记。
-					l.lost.Store(true)
-					if l.onLost != nil {
-						l.onLost()
-					}
-					return
-				}
-			} else {
-				if failCount > 0 {
-					log.Printf("[Failover] Lease refresh recovered after %d failures", failCount)
-				}
-				failCount = 0 // 成功后重置计数
-			}
-		case <-l.ctx.Done():
-			return
-		}
-	}
+	return time.Since(l.base)+safetyMargin < time.Duration(l.expireAt.Load())
 }
 
 // Lost 返回本锁是否已经因续约失败而失效。
 func (l *EtcdLock) Lost() bool { return l.lost.Load() }
+
+// keepAlive 每 ttl/3 续约一次。单次续约失败（etcd 选主、网络抖动）不立即降级，
+// 而是每 renewRetry 重试一次，直到本地估计的剩余有效期不足 safetyMargin 为止：
+// 安全性由 Valid() 保证，失败次数本身不是判断依据。服务端明确返回租约不存在时
+// 立即降级，因为此时 key 已被删除，其他节点随时可能拿到锁。
+func (l *EtcdLock) keepAlive() {
+	interval := time.Duration(l.ttl) * time.Second / 3
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	failures := 0
+	for {
+		select {
+		case <-timer.C:
+		case <-l.stop:
+			return
+		}
+
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), renewTimeout)
+		resp, err := l.client.KeepAliveOnce(ctx, l.lease)
+		cancel()
+
+		switch {
+		case err == nil:
+			if failures > 0 {
+				log.Printf("[Failover] Lease %d refresh recovered after %d failures", l.lease, failures)
+			}
+			failures = 0
+			l.renewed(start, resp.TTL)
+			timer.Reset(interval)
+		case errors.Is(err, rpctypes.ErrLeaseNotFound):
+			l.markLost(fmt.Sprintf("lease not found on server: %v", err))
+			return
+		case !l.Valid():
+			l.markLost(fmt.Sprintf("lease about to expire after %d failed refreshes, last error: %v", failures+1, err))
+			return
+		default:
+			failures++
+			log.Printf("[Failover] Failed to refresh lease %d (attempt %d), retrying: %v", l.lease, failures, err)
+			timer.Reset(renewRetry)
+		}
+	}
+}
+
+// markLost 标记锁丢失并触发降级。先置位再回调：晋升流程可能还没把本锁挂到
+// Manager 上，它会在挂载前检查这个标记。
+func (l *EtcdLock) markLost(reason string) {
+	log.Printf("[Failover] Lock lost for key %s: %s", l.leaderKey, reason)
+	l.lost.Store(true)
+	l.onLost()
+}
+
+// Release 停止续约并撤销租约，writeLock key 随 lease 撤销自动删除。可重复调用。
+//
+// Revoke 带超时：Release 可能在降级路径上调用，不能被一次卡住的 etcd 请求拖住。
+// 撤销失败也无妨，lease 会在 TTL 到期后自动过期。
+func (l *EtcdLock) Release() {
+	l.stopOnce.Do(func() {
+		close(l.stop)
+		l.lost.Store(true)
+		if l.lease == 0 {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+		defer cancel()
+		if _, err := l.client.Revoke(ctx, l.lease); err != nil {
+			log.Printf("[Failover] Failed to revoke lease %d for key %s: %v", l.lease, l.leaderKey, err)
+			return
+		}
+		log.Printf("[Failover] Lock released for key: %s, lease: %d", l.leaderKey, l.lease)
+	})
+}

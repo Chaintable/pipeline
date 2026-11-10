@@ -19,6 +19,15 @@ const (
 	defaultCheckInterval = 5 * time.Second
 	dialTimeout          = 5 * time.Second
 	readTimeout          = 5 * time.Second
+	// renewTimeout 是单次续约的超时，renewRetry 是续约失败后的重试间隔。
+	renewTimeout = 2 * time.Second
+	renewRetry   = time.Second
+	// safetyMargin 是写入路径在本地估计的租约到期前提前停写的余量，
+	// 用来覆盖降级回调尚未执行的窗口。
+	safetyMargin = 5 * time.Second
+	// minLockTTL 保证续约失败后至少还有几秒的重试窗口：
+	// TTL - TTL/3 - safetyMargin > renewTimeout + renewRetry。
+	minLockTTL = 12
 )
 
 // Config 是主备切换的配置。
@@ -71,8 +80,6 @@ type Manager struct {
 	manualMode   bool
 	manualBackup bool
 
-	ctx       context.Context
-	cancel    context.CancelFunc
 	quit      chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
@@ -83,23 +90,23 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.LockTTL <= 0 {
 		cfg.LockTTL = defaultLockTTL
 	}
+	if cfg.LockTTL < minLockTTL {
+		return nil, fmt.Errorf("lock ttl must be >= %d seconds, got %d", minLockTTL, cfg.LockTTL)
+	}
 	if cfg.LockTTL > 60 {
 		return nil, fmt.Errorf("lock ttl must be <= 60 seconds, got %d", cfg.LockTTL)
 	}
 	if cfg.CheckInterval <= 0 {
 		cfg.CheckInterval = defaultCheckInterval
 	}
-	// 两个回调由 SetupFailover 统一设置，因此下面各调用点不再逐处判空。
-	// 在这里一次性拦住，避免直接构造 Config 时漏设导致运行期 panic。
+	// 两个回调由 SetupFailover 统一设置，在这里一次性拦住，
+	// 避免直接构造 Config 时漏设导致运行期 panic。
 	if cfg.OnBecomeLeader == nil || cfg.OnLoseLeader == nil {
 		return nil, fmt.Errorf("OnBecomeLeader and OnLoseLeader must not be nil")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
 		quit:   make(chan struct{}),
 	}
 
@@ -199,7 +206,7 @@ func (m *Manager) watchLeaderKey() {
 			resp, err := m.client.Get(ctx, m.leaderKey)
 			cancel()
 			if err != nil {
-				// 读不到 etcd 不改变本地角色：已持有的 writeLock 由 WatchDog
+				// 读不到 etcd 不改变本地角色：已持有的 writeLock 由 keepAlive
 				// 负责续约，续不上才降级。
 				log.Printf("[Failover] Failed to get leader key: %v", err)
 				continue
@@ -252,7 +259,6 @@ func (m *Manager) ChangeToChainLeader() error {
 	}
 
 	etcdLock := NewLock(
-		m.ctx,
 		m.writeLockKey,
 		m.leaderKey,
 		m.config.NodeID,
@@ -261,7 +267,7 @@ func (m *Manager) ChangeToChainLeader() error {
 		m.RevokeChainLeader,
 	)
 
-	// 抢锁可能阻塞在 watch 上等待旧主释放，因此不能持有 Mutex。
+	// 抢锁有网络调用，不能持有 Mutex。拿不到就等下一个检查周期重试。
 	if !etcdLock.Acquire() {
 		log.Printf("[Failover] acquire etcd lock failed")
 		return fmt.Errorf("acquire etcd lock failed")
@@ -278,7 +284,7 @@ func (m *Manager) ChangeToChainLeader() error {
 
 	// 位点已对齐，正式宣告成为主节点。临界区只有判断和赋值，没有网络调用。
 	//
-	// 必须在同一临界区内确认锁没有在上面那段耗时窗口里丢失：WatchDog 从 Acquire
+	// 必须在同一临界区内确认锁没有在上面那段耗时窗口里丢失：keepAlive 从 Acquire
 	// 成功那一刻就开始续约，若续约在 OnBecomeLeader 期间失败，它会把锁标记为丢失
 	// 并回调 RevokeChainLeader，而那时 m.lock 仍是 nil，Revoke 会直接返回。
 	// 此处不检查就赋值的话，本节点会带着一个已死的租约永久自认为主节点。
@@ -286,7 +292,7 @@ func (m *Manager) ChangeToChainLeader() error {
 	// Lost 置位发生在 Revoke 尝试获取 Mutex 之前，因此这里读到 false 就意味着
 	// Revoke 必然排在本次赋值之后，它随后能看到并正确释放这把锁。
 	m.Mutex.Lock()
-	if etcdLock.Lost() {
+	if !etcdLock.Valid() {
 		m.Mutex.Unlock()
 		log.Printf("[Failover] writeLock lost during promotion, aborting for node %s", m.config.NodeID)
 		etcdLock.Release()
@@ -301,7 +307,7 @@ func (m *Manager) ChangeToChainLeader() error {
 
 // RevokeChainLeader 释放 writeLock 并降级为备节点。
 //
-// 它同时是 WatchDog 的 onLost 回调：续约失败达到上限即降级。
+// 它同时是续约失败时的回调：租约在本地估计下即将到期或已在服务端消失时降级。
 func (m *Manager) RevokeChainLeader() {
 	m.Mutex.Lock()
 	lock := m.lock
@@ -341,7 +347,8 @@ func (m *Manager) IsLeaderLocked() bool {
 	if m.manualMode {
 		return !m.manualBackup
 	}
-	return m.lock != nil
+	// 租约按本地估计已到期时，即使降级回调还没跑完也必须停写。
+	return m.lock != nil && m.lock.Valid()
 }
 
 // Close 停止周期性检查并释放 writeLock。
@@ -349,8 +356,6 @@ func (m *Manager) Close() error {
 	var err error
 	m.closeOnce.Do(func() {
 		close(m.quit)
-		// 先取消 ctx，中断可能阻塞在 watch 上的抢锁流程，否则 wg.Wait 会一直等。
-		m.cancel()
 		m.wg.Wait()
 		if !m.manualMode {
 			m.RevokeChainLeader()
