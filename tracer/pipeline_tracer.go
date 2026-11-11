@@ -53,12 +53,6 @@ type pipelineTracerConfig struct {
 	NodeID        string   `json:"node_id"`        // default to hostname
 	LockTTL       int64    `json:"lock_ttl"`       // writeLock 租约时长（秒），默认 20
 	CheckInterval int      `json:"check_interval"` // 指派 key 的轮询间隔（秒），默认 5
-
-	// Deprecated and ignored. Kept so older configs can be rolled forward.
-	GracePeriod       int    `json:"grace_period"`
-	WriteLockTTL      int64  `json:"write_lock_ttl"`
-	WriterRegistryTTL int64  `json:"writer_registry_ttl"`
-	ElectionKey       string `json:"election_key"`
 }
 
 func (config *pipelineTracerConfig) fillDefaultValues() {
@@ -81,19 +75,11 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 			config.NodeID = hostname
 		}
 	}
-	// 兼容旧配置：write_lock_ttl 曾用于同一用途
-	if config.LockTTL <= 0 && config.WriteLockTTL > 0 {
-		config.LockTTL = config.WriteLockTTL
-	}
 	if config.LockTTL <= 0 {
 		config.LockTTL = 20
 	}
 	if config.CheckInterval <= 0 {
 		config.CheckInterval = 5
-	}
-	// 兼容旧配置：election_key 与 leader_key 同义
-	if config.LeaderKey == "" && config.ElectionKey != "" {
-		config.LeaderKey = config.ElectionKey
 	}
 }
 
