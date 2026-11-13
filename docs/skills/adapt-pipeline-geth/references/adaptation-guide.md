@@ -462,8 +462,9 @@ Pipeline tracer configuration JSON for geth startup:
     "version": "v1",
     "enable_prestate_tracer": false,
     "etcd_endpoints": ["etcd1:2379", "etcd2:2379"],
-    "election_key": "/pipeline/leader/eth",
-    "grace_period": 10
+    "node_id": "eth-1",
+    "lock_ttl": 20,
+    "check_interval": 5
 }
 ```
 
