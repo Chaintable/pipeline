@@ -2,12 +2,14 @@ package tracer
 
 import (
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ava-labs/libevm/crypto"
 
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -38,10 +40,46 @@ type PipelineTracerConfig struct {
 	Brokers          []string `json:"brokers"`
 	Topic            string   `json:"topic"`
 	S3TempDir        string   `json:"s3_temp_dir"`
-	IsBackup         bool     `json:"is_backup"`
+	IsBackup         *bool    `json:"is_backup"` // nil = auto (use etcd), false = leader in fixed mode, true = backup in fixed mode
+
+	// Auto failover configurations
+	EtcdEndpoints []string `json:"etcd_endpoints"`
+	LeaderKey     string   `json:"leader_key"`     // default to <chain_id>/writers/leader
+	NodeID        string   `json:"node_id"`        // default to hostname
+	LockTTL       int64    `json:"lock_ttl"`       // writeLock 租约时长（秒），默认 20
+	CheckInterval int      `json:"check_interval"` // 指派 key 的轮询间隔（秒），默认 5
+}
+
+func (config *PipelineTracerConfig) fillDefaultValues() {
+	if config.IsBackup == nil && len(config.EtcdEndpoints) == 0 {
+		log.Crit("IsBackup is nil and etcd endpoints is empty, please set IsBackup to true(manual mode) or add etcd endpoints(auto mode)")
+	}
+	if config.IsBackup != nil && len(config.EtcdEndpoints) > 0 {
+		log.Crit("IsBackup is not nil and etcd endpoints is not empty, please set IsBackup to nil(auto mode) or remove etcd endpoints(manual mode)")
+	}
+	if config.NodeID == "" {
+		// 先尝试从环境变量 HOSTNAME 读取
+		if hostname := os.Getenv("HOSTNAME"); hostname != "" {
+			config.NodeID = hostname
+		} else {
+			// 如果环境变量不存在，则使用系统主机名
+			hostname, err := os.Hostname()
+			if err != nil {
+				log.Crit("Failed to get hostname", "err", err)
+			}
+			config.NodeID = hostname
+		}
+	}
+	if config.LockTTL <= 0 {
+		config.LockTTL = 20
+	}
+	if config.CheckInterval <= 0 {
+		config.CheckInterval = 5
+	}
 }
 
 func NewPipelineTracer(config PipelineTracerConfig) (*PipelineTracer, error) {
+	config.fillDefaultValues()
 	t := &PipelineTracer{
 		config: config,
 	}
@@ -50,9 +88,25 @@ func NewPipelineTracer(config PipelineTracerConfig) (*PipelineTracer, error) {
 
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainID.String(), "config", t.config)
-	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.S3TempDir, t.config.IsBackup)
+	// set default leader key: <chain_id>/writers/leader
+	if t.config.LeaderKey == "" {
+		t.config.LeaderKey = failover.BuildLeaderKey(chainConfig.ChainID.String(), "")
+	}
+	err := InitPipeline(t.config.Region, t.config.NodeXBucket, t.config.ChainTableBucket, t.config.Brokers, t.config.Topic, chainConfig.ChainID.String(), t.config.S3TempDir)
 	if err != nil {
 		log.Crit("Failed to init pipeline", "err", err)
+	}
+	// Setup writer failover. 主备切换完全在 pipeline 内完成，coreth 不感知。
+	err = SetupFailover(failover.Config{
+		EtcdEndpoints: t.config.EtcdEndpoints,
+		LeaderKey:     t.config.LeaderKey,
+		NodeID:        t.config.NodeID,
+		IsBackup:      t.config.IsBackup,
+		LockTTL:       t.config.LockTTL,
+		CheckInterval: time.Duration(t.config.CheckInterval) * time.Second,
+	})
+	if err != nil {
+		log.Crit("Failed to setup failover", "err", err)
 	}
 	metrics.NodeInfo.Update(map[string]string{
 		"chain_id": chainConfig.ChainID.String(),
@@ -61,6 +115,14 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 }
 
 func (t *PipelineTracer) OnClose() {
+	// Close the failover manager. 运维指派的 leader key 不删除，
+	// 它跨进程重启保持权威；只释放本节点持有的 writeLock。
+	if manager := failover.GlobalManager; manager != nil {
+		if err := manager.Close(); err != nil {
+			log.Error("Failed to close failover manager", "err", err)
+		}
+		failover.GlobalManager = nil
+	}
 	NodeXPusher.Close()
 }
 
@@ -321,10 +383,10 @@ func (t *PipelineTracer) OnCommit(originRoot common.Hash, root common.Hash, dest
 	// 等待所有上传完成
 	wg.Wait()
 
-	if t.config.IsBackup {
-		log.Info("Backup Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
-	} else {
+	if failover.IsLeaderNode() {
 		log.Info("Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
+	} else {
+		log.Info("Backup Upload block", "block number", BlockCtx.BlockNumber, "block hash", BlockCtx.BlockHash.Hex())
 	}
 
 	// 检查是否有错误
