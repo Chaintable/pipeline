@@ -5,19 +5,17 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/XinFinOrg/XDPoSChain/common"
-	"github.com/XinFinOrg/XDPoSChain/common/hexutil"
 	"github.com/XinFinOrg/XDPoSChain/core/types"
 	"github.com/XinFinOrg/XDPoSChain/core/vm"
 	"github.com/XinFinOrg/XDPoSChain/log"
 	"github.com/XinFinOrg/XDPoSChain/params"
 
-	"github.com/Chaintable/pipeline/leader"
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -49,12 +47,10 @@ type pipelineTracerConfig struct {
 
 	// Auto failover configurations
 	EtcdEndpoints []string `json:"etcd_endpoints"`
-	ElectionKey   string   `json:"election_key"`
-	NodeID        string   `json:"node_id"`      // default to hostname
-	GracePeriod   int      `json:"grace_period"` // default to 10 seconds, unit is second
-
-	// Writer node registry configurations
-	WriterRegistryTTL int64 `json:"writer_registry_ttl"` // TTL for writer node registration in seconds, default 30
+	LeaderKey     string   `json:"leader_key"`     // default to <chain_id>/[<version>/]writers/leader
+	NodeID        string   `json:"node_id"`        // default to hostname
+	LockTTL       int64    `json:"lock_ttl"`       // writeLock 租约时长（秒），默认 20
+	CheckInterval int      `json:"check_interval"` // 指派 key 的轮询间隔（秒），默认 5
 }
 
 func (config *pipelineTracerConfig) fillDefaultValues() {
@@ -77,12 +73,11 @@ func (config *pipelineTracerConfig) fillDefaultValues() {
 			config.NodeID = hostname
 		}
 	}
-	if config.GracePeriod == 0 {
-		config.GracePeriod = 10
+	if config.LockTTL <= 0 {
+		config.LockTTL = 20
 	}
-	// Fill default values for writer registry
-	if config.WriterRegistryTTL == 0 {
-		config.WriterRegistryTTL = 10 // 10 seconds default TTL
+	if config.CheckInterval <= 0 {
+		config.CheckInterval = 5
 	}
 }
 
@@ -106,13 +101,9 @@ func NewPipelineTracer(cfg json.RawMessage) (*PipelineTracer, error) {
 func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 	log.Info("Init pipeline with param", "chainConfig", chainConfig.ChainId.String(), "config", t.config)
 
-	// set default election key
-	if t.config.ElectionKey == "" {
-		if t.config.Version == "" {
-			t.config.ElectionKey = fmt.Sprintf("%s/writers/leader", chainConfig.ChainId.String())
-		} else {
-			t.config.ElectionKey = fmt.Sprintf("%s/%s/writers/leader", chainConfig.ChainId.String(), t.config.Version)
-		}
+	// set default leader key: <chain_id>/[<version>/]writers/leader
+	if t.config.LeaderKey == "" {
+		t.config.LeaderKey = failover.BuildLeaderKey(chainConfig.ChainId.String(), t.config.Version)
 	}
 
 	if t.config.Topic == "" {
@@ -132,26 +123,17 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 		log.Crit("Failed to init pipeline", "err", err)
 	}
 
-	// Prepare writer registry configuration
-	var writerConfig *WriterRegistryConfig
-	// Writer registry is always enabled when etcd endpoints are configured
-	if len(t.config.EtcdEndpoints) > 0 {
-		writerConfig = &WriterRegistryConfig{
-			TTL:              t.config.WriterRegistryTTL,
-			NodeXBucket:      t.config.NodeXBucket,
-			ChainTableBucket: t.config.ChainTableBucket,
-			Region:           t.config.Region,
-			Brokers:          t.config.Brokers,
-			Topic:            t.config.Topic,
-		}
-	}
-
-	// Setup leader election based on configuration
-	err = SetupLeaderElection(t.config.EtcdEndpoints, t.config.ElectionKey,
-		t.config.NodeID, t.config.Version, t.config.IsBackup, t.config.GracePeriod, writerConfig)
+	// Setup writer failover. 主备切换完全在 pipeline 内完成，geth 不感知。
+	err = SetupFailover(failover.Config{
+		EtcdEndpoints: t.config.EtcdEndpoints,
+		LeaderKey:     t.config.LeaderKey,
+		NodeID:        t.config.NodeID,
+		IsBackup:      t.config.IsBackup,
+		LockTTL:       t.config.LockTTL,
+		CheckInterval: time.Duration(t.config.CheckInterval) * time.Second,
+	})
 	if err != nil {
-		log.Crit("Failed to setup leader election", "err", err)
-		// Continue without election - will remain in backup mode
+		log.Crit("Failed to setup failover", "err", err)
 	}
 
 	// start upload work should be after leader election
@@ -171,20 +153,13 @@ func (t *PipelineTracer) OnBlockchainInit(chainConfig *params.ChainConfig) {
 }
 
 func (t *PipelineTracer) OnClose() {
-	// Unregister writer node if registered
-	if WriterRegistry != nil {
-		if err := WriterRegistry.UnregisterNode(); err != nil {
-			log.Error("Failed to unregister writer node during shutdown", "err", err)
-		} else {
-			log.Info("Writer node unregistered during shutdown")
+	// Close the failover manager. 运维指派的 leader key 不删除，
+	// 它跨进程重启保持权威；只释放本节点持有的 writeLock。
+	if manager := failover.GlobalManager; manager != nil {
+		if err := manager.Close(); err != nil {
+			log.Error("Failed to close failover manager", "err", err)
 		}
-	}
-
-	// Close leader manager if it exists
-	if LeaderManager != nil {
-		LeaderManager.Close()
-		// Clear global reference
-		leader.GlobalManager = nil
+		failover.GlobalManager = nil
 	}
 	// Close processors
 	if NodeXPusher != nil {
@@ -227,7 +202,7 @@ func (t *PipelineTracer) OnBlockEnd(blockErr error) {
 	// push block change notification
 	if BlockCtx.BlockChange != nil {
 		start := time.Now()
-		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange)
+		err := NodeXPusher.PushBlockChangeNotification(BlockCtx.BlockChange, nil)
 		if err == nil {
 			log.Info("Push kafka", "dropBlocks", BlockCtx.BlockChange.DropBlocks, "newBlocks", BlockCtx.BlockChange.NewBlocks, "kafka elapsed", common.PrettyDuration(time.Since(start)))
 		} else {
@@ -308,7 +283,7 @@ func (t *PipelineTracer) OnLog(log *types.Log) {
 }
 
 func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.GenesisAlloc) {
-	if NodeXPusher.LastBlockNotice != nil {
+	if NodeXPusher.LastPushedBlock() != nil {
 		return
 	}
 
@@ -330,133 +305,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 	}
 	log.Info("[inner s3] 2.upload genesis state diff", "block", block.Hash().Hex())
 
-	// 业务s3
-	blockFile := &ptypes.BlockFile{
-		Block:            util.BuildPipelineBlock(block),
-		Txs:              make([]ptypes.Transaction, 0),
-		Events:           make([]ptypes.Event, 0),
-		Traces:           make([]ptypes.Trace, 0),
-		ErrorEvents:      make([]ptypes.Event, 0),
-		ErrorTraces:      make([]ptypes.Trace, 0),
-		StorageContracts: make([]string, 0),
-	}
-
-	// 构造 genesis tx 和 trace
-	zeroAddr := "0x0000000000000000000000000000000000000000"
-	txIdx := int64(0)
-
-	// 对地址排序，确保遍历顺序确定性
-	sortedAddrs := make([]common.Address, 0, len(alloc))
-	for addr := range alloc {
-		sortedAddrs = append(sortedAddrs, addr)
-	}
-	sort.Slice(sortedAddrs, func(i, j int) bool {
-		return sortedAddrs[i].Hex() < sortedAddrs[j].Hex()
-	})
-
-	for _, addr := range sortedAddrs {
-		account := alloc[addr]
-		addrLower := strings.ToLower(addr.Hex())
-
-		// 处理有 Storage 的账户
-		if len(account.Storage) > 0 {
-			blockFile.StorageContracts = append(blockFile.StorageContracts, addrLower)
-		}
-
-		// 处理有 balance 的账户 - 构造转账 tx 和 call trace
-		if account.Balance != nil && account.Balance.Sign() > 0 {
-			// tx id: 0xgenesis01 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis01%013d%s", 0, addrLower)
-
-			tx := ptypes.Transaction{
-				ID:               txID,
-				From:             zeroAddr,
-				To:               addrLower,
-				Gas:              big.NewInt(0),
-				GasPrice:         big.NewInt(0),
-				GasUsed:          big.NewInt(0),
-				Status:           true,
-				GasFeeCap:        big.NewInt(0),
-				GasTipCap:        big.NewInt(0),
-				Input:            []byte{},
-				Nonce:            big.NewInt(0),
-				TransactionIndex: txIdx,
-				Value:            (*hexutil.Big)(account.Balance),
-			}
-			blockFile.Txs = append(blockFile.Txs, tx)
-
-			// trace id = hash(tx_id, parent_trace_id, pos_in_parent_trace)
-			traceID := util.ToHash([]string{txID, "", "0"})
-			trace := ptypes.Trace{
-				ID:                traceID,
-				From:              zeroAddr,
-				Gas:               big.NewInt(0),
-				Input:             []byte{},
-				To:                addrLower,
-				Value:             (*hexutil.Big)(account.Balance),
-				GasUsed:           big.NewInt(0),
-				Output:            []byte{},
-				CallCreateType:    "call",
-				CallType:          "call",
-				TxID:              txID,
-				ParentTraceID:     "",
-				PosInParentTrace:  0,
-				SelfStorageChange: false,
-				StorageChange:     false,
-				Subtraces:         0,
-				TraceAddress:      []int64{},
-			}
-			blockFile.Traces = append(blockFile.Traces, trace)
-			txIdx++
-		}
-
-		// 处理有 code 的账户 - 构造 create tx 和 create trace
-		if len(account.Code) > 0 {
-			// tx id: 0xgenesis02 + 13个0 + 地址(42字符) = 66字符
-			txID := fmt.Sprintf("0xgenesis02%013d%s", 0, addrLower)
-
-			tx := ptypes.Transaction{
-				ID:               txID,
-				From:             zeroAddr,
-				To:               addrLower,
-				Gas:              big.NewInt(0),
-				GasPrice:         big.NewInt(0),
-				GasUsed:          big.NewInt(0),
-				Status:           true,
-				GasFeeCap:        big.NewInt(0),
-				GasTipCap:        big.NewInt(0),
-				Input:            account.Code,
-				Nonce:            big.NewInt(0),
-				TransactionIndex: txIdx,
-				Value:            (*hexutil.Big)(big.NewInt(0)),
-			}
-			blockFile.Txs = append(blockFile.Txs, tx)
-
-			// trace id = hash(tx_id, parent_trace_id, pos_in_parent_trace)
-			traceID := util.ToHash([]string{txID, "", "0"})
-			trace := ptypes.Trace{
-				ID:                traceID,
-				From:              zeroAddr,
-				Gas:               big.NewInt(0),
-				Input:             account.Code,
-				To:                addrLower,
-				Value:             (*hexutil.Big)(big.NewInt(0)),
-				GasUsed:           big.NewInt(0),
-				Output:            account.Code, // output 直接使用 input (code)
-				CallCreateType:    "create",
-				CallType:          "",
-				TxID:              txID,
-				ParentTraceID:     "",
-				PosInParentTrace:  0,
-				SelfStorageChange: false,
-				StorageChange:     false,
-				Subtraces:         0,
-				TraceAddress:      []int64{},
-			}
-			blockFile.Traces = append(blockFile.Traces, trace)
-			txIdx++
-		}
-	}
+	blockFile := BuildGenesisBlockFile(block, alloc)
 
 	// upload block file and meta data
 	err = uploadBlockFile(blockFile)
@@ -486,7 +335,7 @@ func (t *PipelineTracer) OnGenesisBlock(block *types.Block, alloc ptypes.Genesis
 		},
 	}
 
-	err = NodeXPusher.PushBlockChangeNotification(blockChanges)
+	err = NodeXPusher.PushBlockChangeNotification(blockChanges, nil)
 	if err != nil {
 		log.Crit("Failed to push block change notification", "err", err)
 	}
