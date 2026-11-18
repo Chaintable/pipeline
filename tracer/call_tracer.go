@@ -94,7 +94,6 @@ func (f *callFrame) processOutput(output []byte, err error) {
 type callTracer struct {
 	callstack []callFrame
 	gasLimit  uint64
-	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
