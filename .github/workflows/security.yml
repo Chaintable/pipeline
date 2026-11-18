@@ -30,5 +30,7 @@ jobs:
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
         with:
-          go-version-input: "1.24"
+          # govulncheck@latest tracks recent Go releases (x/vuln v1.8.0+ needs go >= 1.26),
+          # and the action installs it with GOTOOLCHAIN=local, so it must run on a current Go.
+          go-version-input: "stable"
           go-package: ./...
