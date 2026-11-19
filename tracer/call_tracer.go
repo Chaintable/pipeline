@@ -273,8 +273,9 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	size := len(t.callstack)
-	if size <= 1 {
+	// Logs emitted by the top-level frame belong to callstack[0]; only an
+	// empty callstack (no frame entered yet) has nowhere to attach the log.
+	if len(t.callstack) == 0 {
 		return
 	}
 	topics := make([]string, len(log.Topics))
