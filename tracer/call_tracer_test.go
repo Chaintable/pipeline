@@ -1,11 +1,15 @@
 package tracer
 
 import (
+	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
 	ptypes "github.com/Chaintable/pipeline/types"
+	"github.com/Chaintable/pipeline/util"
 	"github.com/morph-l2/go-ethereum/common"
+	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/core/vm"
 )
 
@@ -45,7 +49,7 @@ func TestParentFailedChildrenMovedToErrorTraces(t *testing.T) {
 	root := callFrame{Type: vm.CALL, To: testAddr(1), Calls: []callFrame{child0, child1}}
 
 	tr := newTestCallTracer()
-	tr.callstack = []callFrame{root}
+	tr.roots = []callFrame{root}
 	tr.OnTxEnd(nil, nil)
 
 	bf := tr.BlockFile
@@ -91,7 +95,7 @@ func TestTopLevelFailedMarksWholeSubtree(t *testing.T) {
 	root := callFrame{Type: vm.CALL, To: testAddr(1), Error: "execution reverted", Calls: []callFrame{child}}
 
 	tr := newTestCallTracer()
-	tr.callstack = []callFrame{root}
+	tr.roots = []callFrame{root}
 	tr.OnTxEnd(nil, nil)
 
 	bf := tr.BlockFile
@@ -119,7 +123,7 @@ func TestAllSuccessNoErrorTraces(t *testing.T) {
 	root := callFrame{Type: vm.CALL, To: testAddr(1), Calls: []callFrame{child}}
 
 	tr := newTestCallTracer()
-	tr.callstack = []callFrame{root}
+	tr.roots = []callFrame{root}
 	tr.OnTxEnd(nil, nil)
 
 	bf := tr.BlockFile
@@ -148,7 +152,7 @@ func TestSelfDestructUnderFailedParentIsErrorTrace(t *testing.T) {
 	root := callFrame{Type: vm.CALL, To: testAddr(1), Calls: []callFrame{failed}}
 
 	tr := newTestCallTracer()
-	tr.callstack = []callFrame{root}
+	tr.roots = []callFrame{root}
 	tr.OnTxEnd(nil, nil)
 
 	bf := tr.BlockFile
@@ -168,5 +172,56 @@ func TestSelfDestructUnderFailedParentIsErrorTrace(t *testing.T) {
 	}
 	if len(got.TraceAddress) != 2 || got.TraceAddress[0] != 0 || got.TraceAddress[1] != 0 {
 		t.Errorf("SELFDESTRUCT TraceAddress = %v, want [0 0]", got.TraceAddress)
+	}
+}
+
+func TestMultipleTopLevelCalls(t *testing.T) {
+	tr := newTestCallTracer()
+	for i, op := range []vm.OpCode{vm.STATICCALL, vm.CALL, vm.CALL, vm.CALL} {
+		to := *testAddr(byte(i + 1))
+		tr.OnEnter(0, byte(op), common.Address{}, to, nil, 100, nil)
+		if i != 0 {
+			tr.OnLog(&types.Log{Address: to, Index: uint(i)})
+			tr.OnOpcode(0, byte(vm.SSTORE), 0, 0, nil, nil, 1, nil)
+		}
+		var err error
+		if i == 2 {
+			err = vm.ErrExecutionReverted
+		}
+		tr.OnExit(0, []byte{byte(i)}, uint64(i+1), err, err != nil)
+	}
+	tr.OnTxEnd(&types.Receipt{Status: types.ReceiptStatusFailed}, nil)
+	b := tr.BlockFile
+	if len(b.Traces) != 4 || len(b.ErrorTraces) != 1 || len(b.Events) != 2 || len(b.ErrorEvents) != 1 {
+		t.Fatalf("unexpected block file: %+v", b)
+	}
+	root := b.Traces[0]
+	if root.CallCreateType != "empty" || root.CallType != "" || root.ParentTraceID != "" ||
+		root.Subtraces != 4 || root.SelfStorageChange || !root.StorageChange ||
+		root.ID != util.ToHash([]string{tr.txID, "", "0"}) || len(root.TraceAddress) != 0 {
+		t.Fatalf("root: %+v", root)
+	}
+	for i, child := range []ptypes.Trace{b.Traces[1], b.Traces[2], b.ErrorTraces[0], b.Traces[3]} {
+		if child.ParentTraceID != root.ID || child.PosInParentTrace != int64(i) ||
+			!slices.Equal(child.TraceAddress, []int64{int64(i)}) ||
+			child.GasUsed.Uint64() != uint64(i+1) || !bytes.Equal(child.Output, []byte{byte(i)}) {
+			t.Fatalf("child %d: %+v", i, child)
+		}
+	}
+	if b.Traces[1].CallType != "staticcall" || b.Events[0].ParentTraceID != b.Traces[2].ID ||
+		b.Events[1].ParentTraceID != b.Traces[3].ID || b.ErrorEvents[0].ParentTraceID != b.ErrorTraces[0].ID {
+		t.Fatalf("incorrect fee or business frames: %+v", b)
+	}
+}
+
+func TestTxEndWithoutCompleteTree(t *testing.T) {
+	tr := newTestCallTracer()
+	tr.OnTxEnd(nil, nil)
+	tr.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 0, nil)
+	tr.OnExit(0, nil, 0, nil, false)
+	tr.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 0, nil)
+	tr.OnTxEnd(nil, nil)
+	if len(tr.BlockFile.Traces)+len(tr.BlockFile.ErrorTraces) != 0 {
+		t.Fatal("emitted partial tree")
 	}
 }

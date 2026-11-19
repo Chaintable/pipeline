@@ -32,6 +32,7 @@ import (
 	"github.com/morph-l2/go-ethereum/core/tracing"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/core/vm"
+	"github.com/morph-l2/go-ethereum/log"
 )
 
 type callFrame struct {
@@ -96,8 +97,8 @@ func (f *callFrame) processOutput(output []byte, err error, reverted bool) {
 
 type callTracer struct {
 	callstack []callFrame
+	roots     []callFrame
 	gasLimit  uint64
-	depth     int
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
 
@@ -174,7 +175,6 @@ func (t *callTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tr
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
 func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
-	t.depth = depth
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
@@ -195,36 +195,21 @@ func (t *callTracer) OnEnter(depth int, typ byte, from common.Address, to common
 // OnExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
 func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if depth == 0 {
-		t.captureEnd(output, gasUsed, err, reverted)
-		return
-	}
-
-	t.depth = depth - 1
-
 	size := len(t.callstack)
-	if size <= 1 {
+	if size == 0 || (depth == 0 && size != 1) || (depth != 0 && size == 1) {
 		return
 	}
-	// Pop call.
 	call := t.callstack[size-1]
 	t.callstack = t.callstack[:size-1]
-	size -= 1
-
 	call.GasUsed = gasUsed
 	call.processOutput(output, err, reverted)
-	// Nest call into parent.
-	// 忽略失败的调用
-	call.PosInParentTrace = len(t.callstack[size-1].Calls) + len(t.callstack[size-1].Logs)
-	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
-}
-
-func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
-	if len(t.callstack) != 1 {
+	if depth == 0 {
+		t.roots = append(t.roots, call)
 		return
 	}
-	t.callstack[0].GasUsed = gasUsed
-	t.callstack[0].processOutput(output, err, reverted)
+	parent := &t.callstack[size-2]
+	call.PosInParentTrace = len(parent.Calls) + len(parent.Logs)
+	parent.Calls = append(parent.Calls, call)
 }
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
@@ -237,18 +222,29 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		return
 	}
-	setParentFailed(&t.callstack[0], false)
-	setStorageChange(&t.callstack[0], t.ChangeContracts)
-	if len(t.callstack) == 1 {
-		topCall := &t.callstack[0]
-		topCall.TraceID = util.ToHash([]string{t.txID, "", "0"})
-		if topCall.failed() {
-			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(topCall, []int64{}))
-		} else {
-			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(topCall, []int64{}))
-		}
-		t.addTraceAndLog(topCall, []int64{})
+	if len(t.callstack) != 0 {
+		log.Error("Unclosed Morph call frames", "tx", t.txID, "frames", len(t.callstack))
+		return
 	}
+	if len(t.roots) == 0 {
+		return
+	}
+	root := &t.roots[0]
+	if len(t.roots) > 1 {
+		for i := range t.roots {
+			t.roots[i].PosInParentTrace = i
+		}
+		root = &callFrame{Calls: t.roots}
+	}
+	setParentFailed(root, false)
+	setStorageChange(root, t.ChangeContracts)
+	root.TraceID = util.ToHash([]string{t.txID, "", "0"})
+	if root.failed() {
+		t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(root, []int64{}))
+	} else {
+		t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(root, []int64{}))
+	}
+	t.addTraceAndLog(root, []int64{})
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
