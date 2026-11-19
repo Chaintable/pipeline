@@ -1,5 +1,5 @@
-github.com/Chaintable/go-ethereum-morph-x v1.10.14-0.20261111080607-14586854cf71 h1:Au7yLEQbjg+jJ0GoDK4BZTtIpG2fSbGu/UlUEb5833Y=
-github.com/Chaintable/go-ethereum-morph-x v1.10.14-0.20261111080607-14586854cf71/go.mod h1:hT5CP4b5FfnK8P8jbp6U6qWxbsxrvokIzfOKB74W12M=
+github.com/Chaintable/go-ethereum-morph-x v0.0.0-20261111080607-14586854cf71 h1:GwiGylGFvib3Vngs6YkMYn/vAVd1UZG8tZQS/W9fUH8=
+github.com/Chaintable/go-ethereum-morph-x v0.0.0-20261111080607-14586854cf71/go.mod h1:hT5CP4b5FfnK8P8jbp6U6qWxbsxrvokIzfOKB74W12M=
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=

@@ -80,4 +80,4 @@ require (
 	google.golang.org/protobuf v1.34.2 // indirect
 )
 
-replace github.com/morph-l2/go-ethereum => github.com/Chaintable/go-ethereum-morph-x v1.10.14-0.20261111080607-14586854cf71
+replace github.com/morph-l2/go-ethereum => github.com/Chaintable/go-ethereum-morph-x v0.0.0-20261111080607-14586854cf71
