@@ -275,6 +275,9 @@ func (t *PipelineTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		t.prestateTracer.OnTxEnd(receipt, err)
 	}
 
+	if err != nil {
+		return
+	}
 	tx := util.BuildPipelineTransaction(BlockCtx.Tx, receipt, BlockCtx.From, BlockCtx.BlockHeader.BaseFeePerGas.ToInt())
 	BlockCtx.BlockFile.Txs = append(BlockCtx.BlockFile.Txs, tx)
 }

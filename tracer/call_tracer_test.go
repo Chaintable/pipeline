@@ -2,6 +2,7 @@ package tracer
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -220,8 +221,30 @@ func TestTxEndWithoutCompleteTree(t *testing.T) {
 	tr.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 0, nil)
 	tr.OnExit(0, nil, 0, nil, false)
 	tr.OnEnter(0, byte(vm.CALL), common.Address{}, common.Address{}, nil, 0, nil)
-	tr.OnTxEnd(nil, nil)
-	if len(tr.BlockFile.Traces)+len(tr.BlockFile.ErrorTraces) != 0 {
-		t.Fatal("emitted partial tree")
+	defer func() {
+		if got := recover(); got != "unclosed Morph call frames: tx 0xdeadbeef, frames 1" {
+			t.Fatalf("unexpected panic: %v", got)
+		}
+		if len(tr.BlockFile.Traces)+len(tr.BlockFile.ErrorTraces) != 0 {
+			t.Fatal("emitted partial tree")
+		}
+	}()
+	tr.OnTxEnd(&types.Receipt{}, nil)
+}
+
+func TestTxEndValidationError(t *testing.T) {
+	err := errors.New("transaction validation failed")
+	previous := BlockCtx
+	t.Cleanup(func() { BlockCtx = previous })
+	BlockCtx = &ExtraInfo{BlockFile: &ptypes.BlockFile{}}
+	pipeline := &PipelineTracer{callTracer: newTestCallTracer()}
+	pipeline.OnTxEnd(nil, err)
+	if pipeline.callTracer != nil || len(BlockCtx.BlockFile.Txs) != 0 {
+		t.Fatal("pipeline retained invalid transaction")
+	}
+	rpc := &RPCTracer{callTracer: newTestCallTracer(), currentBlock: &RPCBlockContext{BlockFile: &ptypes.BlockFile{}}}
+	rpc.OnTxEnd(nil, err)
+	if rpc.callTracer != nil || len(rpc.currentBlock.BlockFile.Txs) != 0 {
+		t.Fatal("RPC tracer retained invalid transaction")
 	}
 }

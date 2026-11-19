@@ -32,7 +32,6 @@ import (
 	"github.com/morph-l2/go-ethereum/core/tracing"
 	"github.com/morph-l2/go-ethereum/core/types"
 	"github.com/morph-l2/go-ethereum/core/vm"
-	"github.com/morph-l2/go-ethereum/log"
 )
 
 type callFrame struct {
@@ -223,8 +222,7 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 	if len(t.callstack) != 0 {
-		log.Error("Unclosed Morph call frames", "tx", t.txID, "frames", len(t.callstack))
-		return
+		panic(fmt.Sprintf("unclosed Morph call frames: tx %s, frames %d", t.txID, len(t.callstack)))
 	}
 	if len(t.roots) == 0 {
 		return
