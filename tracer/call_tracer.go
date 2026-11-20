@@ -140,6 +140,8 @@ func (t *callTracer) ToTrace(f *callFrame, traceAddress []int64) ptypes.Trace {
 		if f.RevertReason != "" {
 			err = fmt.Sprintf("%s: %s", f.Error, f.RevertReason)
 		}
+	} else if f.ParentFailed {
+		err = "parent call failed"
 	}
 	return ptypes.Trace{
 		ID:                f.TraceID,
@@ -174,8 +176,8 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Ad
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
-		Gas:   t.gasLimit,
-		Value: value,
+		Gas:   gas,
+		Value: new(big.Int).Set(value),
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -190,13 +192,17 @@ func (t *callTracer) CaptureEnd(output []byte, gasUsed uint64, _ time.Duration, 
 
 func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
 	toCopy := to
+	var valueCopy *big.Int
+	if value != nil {
+		valueCopy = new(big.Int).Set(value)
+	}
 	call := callFrame{
 		Type:  typ,
 		From:  from,
 		To:    &toCopy,
 		Input: common.CopyBytes(input),
 		Gas:   gas,
-		Value: value,
+		Value: valueCopy,
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -347,7 +353,7 @@ func (t *callTracer) addTraceAndLog(cf *callFrame, traceAddress []int64) {
 		}
 	}
 	for i := range cf.Calls {
-		if cf.Calls[i].failed() {
+		if cf.Calls[i].failed() || cf.Calls[i].ParentFailed {
 			t.BlockFile.ErrorTraces = append(t.BlockFile.ErrorTraces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
 		} else {
 			t.BlockFile.Traces = append(t.BlockFile.Traces, t.ToTrace(&cf.Calls[i], childTraceAddress(traceAddress, int64(i))))
