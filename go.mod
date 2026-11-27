@@ -1,8 +1,6 @@
 module github.com/Chaintable/pipeline
 
-go 1.23.0
-
-toolchain go1.23.9
+go 1.24
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.32.5
@@ -11,7 +9,7 @@ require (
 	github.com/aws/smithy-go v1.22.1
 	github.com/ethereum/go-ethereum v1.15.11
 	github.com/holiman/uint256 v1.3.2
-	github.com/klauspost/compress v1.17.11
+	github.com/klauspost/compress v1.18.7
 	github.com/segmentio/kafka-go v0.4.47
 	go.etcd.io/etcd/client/v3 v3.5.10
 )
