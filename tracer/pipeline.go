@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Chaintable/pipeline/failover"
 	"github.com/Chaintable/pipeline/metrics"
 	"github.com/Chaintable/pipeline/processor"
 	ptypes "github.com/Chaintable/pipeline/types"
@@ -38,16 +39,47 @@ var (
 	BizChainID             string
 )
 
-func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string, isBackup bool) (err error) {
-	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir, isBackup)
+func InitPipeline(region string, nodeXBucket string, chainTableBucket string, brokers []string, topic string, bizChainID string, s3TmpDir string) (err error) {
+	NodeXPusher, err = processor.NewPushProcessor(region, nodeXBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
-	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic, s3TmpDir, isBackup)
+	ChainTableBucketPusher, err = processor.NewPushProcessor(region, chainTableBucket, brokers, topic, s3TmpDir)
 	if err != nil {
 		return err
 	}
 	BizChainID = bizChainID
+	return nil
+}
+
+// SetupFailover 初始化写节点主备切换。主备逻辑全部收敛在 failover 包内，
+// 上层（含 coreth）不感知角色变化：写入路径自己判断是否为主节点。
+func SetupFailover(cfg failover.Config) error {
+	cfg.OnBecomeLeader = func() error {
+		log.Info("Updating last block info on leader transition")
+		if NodeXPusher != nil {
+			if err := NodeXPusher.UpdateLastBlock(); err != nil {
+				log.Error("Failed to update NodeX last block", "err", err)
+				return fmt.Errorf("update NodeX Kafka checkpoint: %w", err)
+			}
+		}
+		return nil
+	}
+	cfg.OnLoseLeader = func() error { return nil }
+
+	manager, err := failover.NewManager(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create failover manager: %w", err)
+	}
+	failover.GlobalManager = manager
+
+	if err := manager.Start(); err != nil {
+		_ = manager.Close()
+		failover.GlobalManager = nil
+		return fmt.Errorf("failed to start failover manager: %w", err)
+	}
+
+	log.Info("Failover setup completed", "nodeID", cfg.NodeID, "leaderKey", cfg.LeaderKey)
 	return nil
 }
 
